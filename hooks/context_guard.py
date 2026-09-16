@@ -14,7 +14,7 @@ def _number(value: Any) -> int | float | None:
         return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(parsed):
         return None
@@ -70,6 +70,8 @@ def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | No
 def quota_warning(rate_limit: dict) -> str | None:
     """Classify remaining five-hour quota as no warning, soft, or strong."""
     if not isinstance(rate_limit, dict):
+        return None
+    if _number(rate_limit.get("window_minutes")) != 300:
         return None
     used = _number(rate_limit.get("used_percent"))
     if used is None or not 0 <= used <= 100:
