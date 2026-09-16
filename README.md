@@ -35,40 +35,67 @@ for the frozen V1 specification.
 
 ## Validate locally
 
-Run the automated tests from the plugin root:
+Run these commands from the plugin root. The hook and unit tests use only the
+Python standard library. The Codex plugin and skill validators additionally
+require PyYAML. Create an isolated, ignored environment with the bundled Codex
+workspace Python (Python 3.12 on this machine):
 
 ```bash
-python3 -m unittest discover -s tests -v
+BUNDLED_PYTHON="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+"$BUNDLED_PYTHON" -m venv work/validator-venv
+work/validator-venv/bin/python -m pip install 'PyYAML==6.0.3'
+
+VALIDATOR_PYTHON="$PWD/work/validator-venv/bin/python"
+SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
+"$VALIDATOR_PYTHON" -m unittest discover -s tests -v
+"$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/plugin-creator/scripts/validate_plugin.py" .
+"$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-prepare
+"$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-continue
 ```
+
+The PyYAML installation requires access to your configured Python package
+index on first setup. If your Codex runtime or system skills live elsewhere,
+adjust `BUNDLED_PYTHON` or `SYSTEM_SKILLS` to their installed locations. A local
+Python 3.10+ can also create the environment. All four validation commands
+must exit successfully; the validators print `Plugin validation passed` and
+`Skill is valid!` for each skill.
 
 The following stdin smoke test uses an isolated rollout transcript and plugin
 data directory. It demonstrates a soft warning, a first strong block followed
 by an allowed repeat, automatic-compaction advice, and fail-open handling of
-malformed input:
+malformed input and expired telemetry. Reset timestamps are generated relative
+to the current time, and the records use the real Codex `event_msg` envelope:
 
 ```bash
 SMOKE_DIR="$(mktemp -d)"
 ROLLOUT="$SMOKE_DIR/rollout.jsonl"
 MARKERS="$SMOKE_DIR/markers"
+RESET_AT=$(( $(date +%s) + 18000 ))
 
-printf '%s\n' \
-  '{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":75,"resets_at":101}}}' \
+printf '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":75,"resets_at":%s}}}}\n' "$RESET_AT" \
   > "$ROLLOUT"
 printf '{"session_id":"soft","transcript_path":"%s"}\n' "$ROLLOUT" \
-  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+  | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
 
-printf '%s\n' \
-  '{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":86,"resets_at":202}}}' \
+printf '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":86,"resets_at":%s}}}}\n' "$RESET_AT" \
   > "$ROLLOUT"
 printf '{"session_id":"strong","transcript_path":"%s"}\n' "$ROLLOUT" \
-  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+  | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
 printf '{"session_id":"strong","transcript_path":"%s"}\n' "$ROLLOUT" \
-  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+  | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
 
 printf '{"trigger":"auto"}\n' \
-  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
-printf 'not json\n' | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+  | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
+printf 'not json\n' | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
+
+EXPIRED_AT=$(( $(date +%s) - 1 ))
+printf '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":86,"resets_at":%s}}}}\n' "$EXPIRED_AT" \
+  > "$ROLLOUT"
+printf '{"session_id":"expired","transcript_path":"%s"}\n' "$ROLLOUT" \
+  | PLUGIN_DATA="$SMOKE_DIR/expired-markers" "$VALIDATOR_PYTHON" ./hooks/context_guard.py
+test ! -e "$SMOKE_DIR/expired-markers"
 ```
 
 In order, the decisions are `allow` (with a soft handoff suggestion), `block`,
-`allow`, `allow` (with automatic-compaction advice), and `allow`.
+`allow`, `allow` (with automatic-compaction advice), `allow`, and `allow`.
+The final check confirms expired telemetry creates no marker directory.

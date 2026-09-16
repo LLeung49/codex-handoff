@@ -2,19 +2,22 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from hooks.context_guard import handle_event, latest_primary_rate_limit, quota_warning
 
 
 ROOT = Path(__file__).resolve().parents[1]
+NOW = 4102444800
+RESET = NOW + 18000
 
 
 def rate_limit(used_percent):
-    return {"window_minutes": 300, "used_percent": used_percent, "resets_at": 100}
+    return {"window_minutes": 300, "used_percent": used_percent, "resets_at": RESET}
 
 
-def prompt_payload(directory, used_percent, session_id="session", resets_at=100):
-    """Create a real rollout transcript for a prompt-hook input."""
+def prompt_payload(directory, used_percent, session_id="session", resets_at=RESET):
+    """Create a direct token-count transcript for a prompt-hook input."""
     transcript = Path(directory) / f"rollout-{session_id}-{resets_at}.jsonl"
     transcript.write_text(json.dumps({
         "type": "token_count",
@@ -29,7 +32,7 @@ def prompt_payload(directory, used_percent, session_id="session", resets_at=100)
 
 NON_NULL_EVENT = json.dumps({
     "type": "token_count",
-    "rate_limits": {"primary": {"window_minutes": 300, "used_percent": 10, "resets_at": 100}},
+    "rate_limits": {"primary": {"window_minutes": 300, "used_percent": 10, "resets_at": RESET}},
 })
 NULL_EVENT = json.dumps({
     "type": "token_count",
@@ -37,7 +40,7 @@ NULL_EVENT = json.dumps({
 })
 NEWER_EVENT = json.dumps({
     "type": "token_count",
-    "rate_limits": {"primary": {"window_minutes": 300, "used_percent": 20, "resets_at": 200}},
+    "rate_limits": {"primary": {"window_minutes": 300, "used_percent": 20, "resets_at": RESET + 300}},
 })
 
 
@@ -49,7 +52,27 @@ class TelemetryTests(unittest.TestCase):
             with TemporaryDirectory() as directory:
                 rollout = Path(directory) / "rollout.jsonl"
                 rollout.write_text(NON_NULL_EVENT + "\n" + NULL_EVENT + "\n" + NEWER_EVENT + "\n")
-                self.assertEqual(latest_primary_rate_limit(rollout)["resets_at"], 200)
+                self.assertEqual(latest_primary_rate_limit(rollout)["resets_at"], RESET + 300)
+
+    def test_reads_codex_rollout_envelope_with_trailing_null_limits(self):
+        """Dropping event_msg unwrapping loses actual Codex quota telemetry."""
+        rollout = ROOT / "tests/fixtures/codex-rollout.jsonl"
+        self.assertEqual(latest_primary_rate_limit(rollout), {
+            "window_minutes": 300, "used_percent": 86, "resets_at": 4102462800,
+        })
+
+    def test_newest_unusable_primary_does_not_resurrect_older_snapshot(self):
+        """Skipping an unusable primary would resurrect an older quota window."""
+        for invalid_fields in (
+            {"window_minutes": 60}, {"used_percent": "unknown"},
+            {"used_percent": 101}, {"resets_at": None},
+        ):
+            with self.subTest(invalid_fields=invalid_fields), tempfile.TemporaryDirectory() as directory:
+                rollout = Path(directory) / "rollout.jsonl"
+                primary = {**rate_limit(90), **invalid_fields}
+                newest = json.dumps({"type": "token_count", "rate_limits": {"primary": primary}})
+                rollout.write_text(NON_NULL_EVENT + "\n" + newest + "\n" + NULL_EVENT + "\n")
+                self.assertIsNone(latest_primary_rate_limit(rollout))
 
     def test_quota_warning_boundaries(self):
         self.assertIsNone(quota_warning(rate_limit(74.9)))
@@ -66,20 +89,20 @@ class TelemetryTests(unittest.TestCase):
         events = [
             "not json",
             json.dumps({"type": "token_count", "rate_limits": None}),
-            json.dumps({"type": "token_count", "rate_limits": {"primary": {"window_minutes": 60, "used_percent": 90, "resets_at": 100}}}),
+            json.dumps({"type": "token_count", "rate_limits": {"primary": {"window_minutes": 60, "used_percent": 90, "resets_at": RESET}}}),
             NEWER_EVENT,
         ]
         with tempfile.TemporaryDirectory() as directory:
             rollout = Path(directory) / "rollout.jsonl"
             rollout.write_text("\n".join(events) + "\n")
-            self.assertEqual(latest_primary_rate_limit(rollout)["resets_at"], 200)
+            self.assertEqual(latest_primary_rate_limit(rollout)["resets_at"], RESET + 300)
 
     def test_bounded_tail_discards_partial_leading_line(self):
         with tempfile.TemporaryDirectory() as directory:
             rollout = Path(directory) / "rollout.jsonl"
             rollout.write_text("x" * 100 + "\n" + NEWER_EVENT + "\n")
             tail_bytes = len(NEWER_EVENT.encode()) + 2
-            self.assertEqual(latest_primary_rate_limit(rollout, tail_bytes=tail_bytes)["resets_at"], 200)
+            self.assertEqual(latest_primary_rate_limit(rollout, tail_bytes=tail_bytes)["resets_at"], RESET + 300)
 
 
 class PluginMetadataTests(unittest.TestCase):
@@ -103,10 +126,43 @@ class SkillContractTests(unittest.TestCase):
 
 
 class DecisionTests(unittest.TestCase):
+    def setUp(self):
+        clock = patch("time.time", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def test_real_rollout_blocks_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = {"session_id": "real", "transcript_path": str(ROOT / "tests/fixtures/codex-rollout.jsonl")}
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
+            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+
+    def test_expired_or_current_reset_allows_without_marker(self):
+        """Missing expiry validation would block and write a stale marker."""
+        for reset in (NOW - 1, NOW):
+            with self.subTest(reset=reset), tempfile.TemporaryDirectory() as directory:
+                payload = prompt_payload(directory, used_percent=90, resets_at=reset)
+                data_dir = Path(directory) / "markers"
+                self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+                self.assertFalse(data_dir.exists())
+
+    def test_newest_unsupported_snapshot_allows_without_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=90)
+            transcript = Path(payload["transcript_path"])
+            with transcript.open("a") as stream:
+                stream.write(json.dumps({"type": "token_count", "rate_limits": {
+                    "primary": {"window_minutes": 60, "used_percent": 90, "resets_at": RESET},
+                }}) + "\n")
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+            self.assertFalse(data_dir.exists())
+
     def test_strong_warning_blocks_only_once(self):
         """Removing the atomic marker would make the repeat prompt block."""
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
+            payload = prompt_payload(directory, used_percent=86, session_id="s")
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
             self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
@@ -114,7 +170,7 @@ class DecisionTests(unittest.TestCase):
     def test_soft_warning_allows_with_one_handoff_nudge(self):
         """Removing soft-level deduplication would repeat the nudge."""
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload(directory, used_percent=75, session_id="s", resets_at=10)
+            payload = prompt_payload(directory, used_percent=75, session_id="s")
             data_dir = Path(directory) / "markers"
             first = handle_event(payload, data_dir)
             self.assertEqual(first["decision"], "allow")
@@ -125,8 +181,8 @@ class DecisionTests(unittest.TestCase):
         """Ignoring reset time in the marker key would suppress the second block."""
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
-            first = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
-            second = prompt_payload(directory, used_percent=86, session_id="s", resets_at=20)
+            first = prompt_payload(directory, used_percent=86, session_id="s")
+            second = prompt_payload(directory, used_percent=86, session_id="s", resets_at=RESET + 300)
             self.assertEqual(handle_event(first, data_dir)["decision"], "block")
             self.assertEqual(handle_event(second, data_dir)["decision"], "block")
 
@@ -142,7 +198,7 @@ class DecisionTests(unittest.TestCase):
         """Removing the agent bypass would block and write a marker for child telemetry."""
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
-            payload = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
+            payload = prompt_payload(directory, used_percent=86, session_id="s")
             payload["agent_id"] = "child"
             self.assertEqual(
                 handle_event(payload, data_dir),

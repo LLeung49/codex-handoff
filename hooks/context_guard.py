@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 
@@ -25,7 +26,10 @@ def _number(value: Any) -> int | float | None:
 
 
 def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | None:
-    """Find the newest usable five-hour primary snapshot in a JSONL tail."""
+    """Validate the newest non-null primary snapshot in a JSONL tail.
+
+    An unusable newest snapshot fails open instead of reviving older telemetry.
+    """
     try:
         with path.open("rb") as stream:
             stream.seek(0, 2)
@@ -47,6 +51,8 @@ def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | No
             event = json.loads(line)
         except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
             continue
+        if isinstance(event, dict) and event.get("type") == "event_msg":
+            event = event.get("payload")
         if not isinstance(event, dict) or event.get("type") != "token_count":
             continue
         limits = event.get("rate_limits")
@@ -59,9 +65,9 @@ def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | No
         used = _number(primary.get("used_percent"))
         resets_at = _number(primary.get("resets_at"))
         if window != 300 or used is None or resets_at is None:
-            continue
+            return None
         if not 0 <= used <= 100:
-            continue
+            return None
         snapshot = dict(primary)
         snapshot["window_minutes"] = window
         snapshot["used_percent"] = used
@@ -147,7 +153,9 @@ def handle_event(payload: dict, data_dir: Path) -> dict:
         if level is None:
             return ALLOW
         resets_at = _number(snapshot.get("resets_at"))
-        if resets_at is None or not _claim_marker(Path(data_dir), session_id, resets_at, level):
+        if resets_at is None or resets_at <= time.time():
+            return ALLOW
+        if not _claim_marker(Path(data_dir), session_id, resets_at, level):
             return ALLOW
         if level == "soft":
             return {"decision": "allow", "reason": _soft_reason()}
