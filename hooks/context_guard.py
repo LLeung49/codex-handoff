@@ -1,10 +1,13 @@
-"""Pure telemetry helpers for the context guard hook."""
+"""Fail-open Codex hook decisions for deliberate session handoffs."""
 
 from __future__ import annotations
 
 import json
+import hashlib
 import math
+import os
 from pathlib import Path
+import sys
 from typing import Any
 
 
@@ -82,3 +85,93 @@ def quota_warning(rate_limit: dict) -> str | None:
     if remaining > 15:
         return "soft"
     return "strong"
+
+
+ALLOW = {"decision": "allow"}
+
+
+def _marker_path(data_dir: Path, session_id: str, resets_at: int | float, level: str) -> Path:
+    """Create a filesystem-safe name for the documented marker key."""
+    key = json.dumps([session_id, resets_at, level], separators=(",", ":"), ensure_ascii=True)
+    return data_dir / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".marker")
+
+
+def _claim_marker(data_dir: Path, session_id: str, resets_at: int | float, level: str) -> bool:
+    """Atomically claim a warning key, failing open if storage is unavailable."""
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        marker = _marker_path(data_dir, session_id, resets_at, level)
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _soft_reason() -> str:
+    return "Five-hour quota is low. Consider $handoff-prepare before starting a fresh session."
+
+
+def _strong_reason() -> str:
+    return (
+        "A fresh session is recommended. Run $handoff-prepare now; do not resume this "
+        "same long-running session merely because the quota window resets."
+    )
+
+
+def handle_event(payload: dict, data_dir: Path) -> dict:
+    """Return a Codex hook decision for prompt and compaction events.
+
+    Telemetry and marker failures deliberately return allow.  ``data_dir`` is
+    explicit for testability; the command entrypoint obtains its default from
+    ``PLUGIN_DATA`` when Codex invokes the hook.
+    """
+    try:
+        if not isinstance(payload, dict):
+            return ALLOW
+        if "agent_id" in payload:
+            return ALLOW
+        if payload.get("trigger") == "auto":
+            return {"decision": "allow", "reason": _strong_reason()}
+        if "trigger" in payload:
+            return ALLOW
+
+        session_id = payload.get("session_id")
+        transcript_path = payload.get("transcript_path")
+        if not isinstance(session_id, str) or not session_id or not isinstance(transcript_path, str):
+            return ALLOW
+        snapshot = latest_primary_rate_limit(Path(transcript_path))
+        if snapshot is None:
+            return ALLOW
+        level = quota_warning(snapshot)
+        if level is None:
+            return ALLOW
+        resets_at = _number(snapshot.get("resets_at"))
+        if resets_at is None or not _claim_marker(Path(data_dir), session_id, resets_at, level):
+            return ALLOW
+        if level == "soft":
+            return {"decision": "allow", "reason": _soft_reason()}
+        return {"decision": "block", "reason": _strong_reason()}
+    except Exception:
+        return ALLOW
+
+
+def _plugin_data_dir() -> Path:
+    """Use Codex-provided plugin storage, with a stable local fallback."""
+    configured = os.environ.get("PLUGIN_DATA")
+    if configured:
+        return Path(configured)
+    return Path.home() / ".codex" / "plugin-data" / "codex-handoff"
+
+
+def main() -> None:
+    """Read one hook payload from stdin and emit the Codex decision JSON."""
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        payload = {}
+    print(json.dumps(handle_event(payload, _plugin_data_dir()), separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

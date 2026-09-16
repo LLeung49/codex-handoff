@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from hooks.context_guard import latest_primary_rate_limit, quota_warning
+from hooks.context_guard import handle_event, latest_primary_rate_limit, quota_warning
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +11,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def rate_limit(used_percent):
     return {"window_minutes": 300, "used_percent": used_percent, "resets_at": 100}
+
+
+def prompt_payload(directory, used_percent, session_id="session", resets_at=100):
+    """Create a real rollout transcript for a prompt-hook input."""
+    transcript = Path(directory) / f"rollout-{session_id}-{resets_at}.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "token_count",
+        "rate_limits": {"primary": {
+            "window_minutes": 300,
+            "used_percent": used_percent,
+            "resets_at": resets_at,
+        }},
+    }) + "\n")
+    return {"session_id": session_id, "transcript_path": str(transcript)}
 
 
 NON_NULL_EVENT = json.dumps({
@@ -73,3 +87,50 @@ class PluginMetadataTests(unittest.TestCase):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
+
+
+class DecisionTests(unittest.TestCase):
+    def test_strong_warning_blocks_only_once(self):
+        """Removing the atomic marker would make the repeat prompt block."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
+            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+
+    def test_soft_warning_allows_with_one_handoff_nudge(self):
+        """Removing soft-level deduplication would repeat the nudge."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=75, session_id="s", resets_at=10)
+            data_dir = Path(directory) / "markers"
+            first = handle_event(payload, data_dir)
+            self.assertEqual(first["decision"], "allow")
+            self.assertIn("$handoff-prepare", first["reason"])
+            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+
+    def test_reset_time_rearms_the_warning(self):
+        """Ignoring reset time in the marker key would suppress the second block."""
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            first = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
+            second = prompt_payload(directory, used_percent=86, session_id="s", resets_at=20)
+            self.assertEqual(handle_event(first, data_dir)["decision"], "block")
+            self.assertEqual(handle_event(second, data_dir)["decision"], "block")
+
+    def test_auto_compaction_warns_but_manual_is_silent(self):
+        """Dropping the auto trigger branch would remove the handoff warning."""
+        with tempfile.TemporaryDirectory() as directory:
+            auto = handle_event({"trigger": "auto"}, Path(directory))
+            self.assertEqual(auto["decision"], "allow")
+            self.assertIn("$handoff-prepare", auto["reason"])
+            self.assertEqual(handle_event({"trigger": "manual"}, Path(directory)), {"decision": "allow"})
+
+    def test_subagents_and_malformed_prompt_payloads_fail_open(self):
+        """Reading subagent telemetry or malformed input would violate fail-open bypass."""
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(
+                handle_event({"agent_id": "child", "transcript_path": "/missing"}, data_dir),
+                {"decision": "allow"},
+            )
+            self.assertEqual(handle_event({"session_id": "s"}, data_dir), {"decision": "allow"})
