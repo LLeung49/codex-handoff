@@ -89,6 +89,12 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
 
 
+class HookConfigurationTests(unittest.TestCase):
+    def test_hooks_register_prompt_and_precompact_events(self):
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
+        self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit", "PreCompact"})
+
+
 class SkillContractTests(unittest.TestCase):
     def test_continue_skill_forbids_automatic_execution(self):
         content = (ROOT / "skills/handoff-continue/SKILL.md").read_text()
@@ -132,12 +138,32 @@ class DecisionTests(unittest.TestCase):
             self.assertIn("$handoff-prepare", auto["reason"])
             self.assertEqual(handle_event({"trigger": "manual"}, Path(directory)), {"decision": "allow"})
 
-    def test_subagents_and_malformed_prompt_payloads_fail_open(self):
-        """Reading subagent telemetry or malformed input would violate fail-open bypass."""
+    def test_valid_subagent_telemetry_bypasses_without_marker(self):
+        """Removing the agent bypass would block and write a marker for child telemetry."""
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
+            payload = prompt_payload(directory, used_percent=86, session_id="s", resets_at=10)
+            payload["agent_id"] = "child"
             self.assertEqual(
-                handle_event({"agent_id": "child", "transcript_path": "/missing"}, data_dir),
+                handle_event(payload, data_dir),
                 {"decision": "allow"},
             )
+            self.assertFalse(data_dir.exists())
+
+    def test_malformed_telemetry_allows_without_marker(self):
+        """Treating unreadable telemetry as a warning would write a marker or block."""
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            transcript = Path(directory) / "rollout.jsonl"
+            transcript.write_text("not json\n")
+            self.assertEqual(
+                handle_event({"session_id": "s", "transcript_path": str(transcript)}, data_dir),
+                {"decision": "allow"},
+            )
+            self.assertFalse(data_dir.exists())
+
+    def test_malformed_prompt_payloads_fail_open(self):
+        """Malformed hook payloads must remain harmless."""
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event({"session_id": "s"}, data_dir), {"decision": "allow"})

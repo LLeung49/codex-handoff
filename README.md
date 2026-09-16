@@ -32,3 +32,43 @@ listed next step without your explicit direction.
 
 See [`docs/superpowers/specs/2026-09-16-codex-handoff-v1.md`](docs/superpowers/specs/2026-09-16-codex-handoff-v1.md)
 for the frozen V1 specification.
+
+## Validate locally
+
+Run the automated tests from the plugin root:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The following stdin smoke test uses an isolated rollout transcript and plugin
+data directory. It demonstrates a soft warning, a first strong block followed
+by an allowed repeat, automatic-compaction advice, and fail-open handling of
+malformed input:
+
+```bash
+SMOKE_DIR="$(mktemp -d)"
+ROLLOUT="$SMOKE_DIR/rollout.jsonl"
+MARKERS="$SMOKE_DIR/markers"
+
+printf '%s\n' \
+  '{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":75,"resets_at":101}}}' \
+  > "$ROLLOUT"
+printf '{"session_id":"soft","transcript_path":"%s"}\n' "$ROLLOUT" \
+  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+
+printf '%s\n' \
+  '{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":86,"resets_at":202}}}' \
+  > "$ROLLOUT"
+printf '{"session_id":"strong","transcript_path":"%s"}\n' "$ROLLOUT" \
+  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+printf '{"session_id":"strong","transcript_path":"%s"}\n' "$ROLLOUT" \
+  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+
+printf '{"trigger":"auto"}\n' \
+  | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+printf 'not json\n' | PLUGIN_DATA="$MARKERS" python3 ./hooks/context_guard.py
+```
+
+In order, the decisions are `allow` (with a soft handoff suggestion), `block`,
+`allow`, `allow` (with automatic-compaction advice), and `allow`.
