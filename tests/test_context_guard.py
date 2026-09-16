@@ -89,6 +89,13 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
 
 
+class SkillContractTests(unittest.TestCase):
+    def test_continue_skill_forbids_automatic_execution(self):
+        content = (ROOT / "skills/handoff-continue/SKILL.md").read_text()
+        self.assertIn("does not edit", content)
+        self.assertIn("does not run commands", content)
+
+
 class DecisionTests(unittest.TestCase):
     def test_strong_warning_blocks_only_once(self):
         """Removing the atomic marker would make the repeat prompt block."""
