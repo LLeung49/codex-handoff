@@ -1,4 +1,10 @@
-# codex-handoff
+# codex-handoff plugin source
+
+For public installation, hook trust, first use, and update steps, see the
+[repository README](../../README.md). This directory is the plugin source
+selected by the repository Marketplace.
+
+## Local validation
 
 `codex-handoff` is a Codex-only plugin for deliberately moving work out of a
 long-running session before automatic context compaction or a low five-hour
@@ -11,20 +17,6 @@ to use nearly the whole window while preserving a final turn for handoff.
 It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.
-
-## Install
-
-Install this repository as a local Codex plugin, then enable its hooks and
-skills in the Codex environment. The plugin manifest points to the `skills/`
-skill root.
-
-## Trust the hooks
-
-Review and trust the hooks before enabling them. The synchronous
-`UserPromptSubmit` hook reads only bounded rollout telemetry and fails open on
-unreadable or malformed data. The `PreCompact` hook warns only for automatic
-compaction. Neither hook starts a session, runs `handoff-prepare`, or edits
-project files.
 
 ## Deliberate new-session workflow
 

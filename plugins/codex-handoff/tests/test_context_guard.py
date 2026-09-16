@@ -108,6 +108,16 @@ class TelemetryTests(unittest.TestCase):
 
 
 class PluginMetadataTests(unittest.TestCase):
+    def test_root_readme_documents_public_marketplace_installation(self):
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = (marketplace_root / "README.md").read_text()
+        self.assertIn("codex plugin marketplace add", readme)
+        self.assertIn("codex plugin add codex-handoff@codex-handoff", readme)
+        self.assertNotIn("/Users/lucienleung", readme)
+
     def test_marketplace_points_to_the_nested_plugin(self):
         marketplace_root = next(
             (candidate for candidate in (ROOT, *ROOT.parents)
