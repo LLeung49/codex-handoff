@@ -108,6 +108,20 @@ class TelemetryTests(unittest.TestCase):
 
 
 class PluginMetadataTests(unittest.TestCase):
+    def test_marketplace_points_to_the_nested_plugin(self):
+        marketplace_root = next(
+            (candidate for candidate in (ROOT, *ROOT.parents)
+             if (candidate / ".agents/plugins/marketplace.json").exists()),
+            ROOT,
+        )
+        marketplace = json.loads(
+            (marketplace_root / ".agents/plugins/marketplace.json").read_text()
+        )
+        entry = marketplace["plugins"][0]
+        self.assertEqual(marketplace["name"], "codex-handoff")
+        self.assertEqual(entry["name"], "codex-handoff")
+        self.assertEqual(entry["source"]["path"], "./plugins/codex-handoff")
+
     def test_plugin_manifest_declares_the_plugin_and_skill_root(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
         self.assertEqual(manifest["name"], "codex-handoff")
