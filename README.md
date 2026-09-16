@@ -4,6 +4,10 @@
 long-running session before automatic context compaction or a low five-hour
 Coding Plan quota makes a useful handoff less likely.
 
+For the five-hour quota, it gives one soft nudge between 25% and 3% remaining,
+then applies one protective block at 3% remaining or below. This leaves room
+to use nearly the whole window while preserving a final turn for handoff.
+
 It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.

@@ -58,7 +58,7 @@ class TelemetryTests(unittest.TestCase):
         """Dropping event_msg unwrapping loses actual Codex quota telemetry."""
         rollout = ROOT / "tests/fixtures/codex-rollout.jsonl"
         self.assertEqual(latest_primary_rate_limit(rollout), {
-            "window_minutes": 300, "used_percent": 86, "resets_at": 4102462800,
+            "window_minutes": 300, "used_percent": 97, "resets_at": 4102462800,
         })
 
     def test_newest_unusable_primary_does_not_resurrect_older_snapshot(self):
@@ -77,7 +77,9 @@ class TelemetryTests(unittest.TestCase):
     def test_quota_warning_boundaries(self):
         self.assertIsNone(quota_warning(rate_limit(74.9)))
         self.assertEqual(quota_warning(rate_limit(75)), "soft")
-        self.assertEqual(quota_warning(rate_limit(85)), "strong")
+        self.assertEqual(quota_warning(rate_limit(85)), "soft")
+        self.assertEqual(quota_warning(rate_limit(96)), "soft")
+        self.assertEqual(quota_warning(rate_limit(97)), "strong")
 
     def test_quota_warning_ignores_unsupported_window(self):
         self.assertIsNone(quota_warning({"window_minutes": 60, "used_percent": 90}))
@@ -162,7 +164,7 @@ class DecisionTests(unittest.TestCase):
     def test_strong_warning_blocks_only_once(self):
         """Removing the atomic marker would make the repeat prompt block."""
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload(directory, used_percent=86, session_id="s")
+            payload = prompt_payload(directory, used_percent=97, session_id="s")
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
             self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
@@ -181,8 +183,8 @@ class DecisionTests(unittest.TestCase):
         """Ignoring reset time in the marker key would suppress the second block."""
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
-            first = prompt_payload(directory, used_percent=86, session_id="s")
-            second = prompt_payload(directory, used_percent=86, session_id="s", resets_at=RESET + 300)
+            first = prompt_payload(directory, used_percent=97, session_id="s")
+            second = prompt_payload(directory, used_percent=97, session_id="s", resets_at=RESET + 300)
             self.assertEqual(handle_event(first, data_dir)["decision"], "block")
             self.assertEqual(handle_event(second, data_dir)["decision"], "block")
 

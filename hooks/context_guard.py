@@ -88,7 +88,7 @@ def quota_warning(rate_limit: dict) -> str | None:
     remaining = 100 - used
     if remaining > 25:
         return None
-    if remaining > 15:
+    if remaining > 3:
         return "soft"
     return "strong"
 

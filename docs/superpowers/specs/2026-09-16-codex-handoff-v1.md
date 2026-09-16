@@ -67,8 +67,8 @@ Markers live under a plugin data directory. Their logical key is:
 | Remaining five-hour quota | First occurrence in the key | Later occurrence in the key |
 | --- | --- | --- |
 | More than 25% | Allow silently | Allow silently |
-| More than 15% through 25% | Allow with one soft handoff nudge | Allow silently |
-| 15% or less | Block once with a protective handoff message | Allow silently |
+| More than 3% through 25% | Allow with one soft handoff nudge | Allow silently |
+| 3% or less | Block once with a protective handoff message | Allow silently |
 
 The protective block reserves the remaining allowance for producing a handoff. It does not try to detect a service-enforced quota exhaustion state.
 
@@ -120,7 +120,7 @@ Automated tests must cover:
 
 - newest valid rate-limit snapshot is selected from a JSONL tail;
 - malformed lines and null `rate_limits` fail open;
-- 25%, 15%, and above-25% boundaries;
+- 25%, 3%, and above-25% boundaries;
 - marker deduplication and reset-time re-arming;
 - subagents bypass the guard;
 - `PreCompact(auto)` warns and `PreCompact(manual)` is silent;

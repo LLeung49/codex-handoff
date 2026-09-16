@@ -96,7 +96,8 @@ def test_uses_newest_non_null_primary_rate_limit(tmp_path):
 def test_quota_warning_boundaries():
     assert quota_warning(rate_limit(74.9)) is None
     assert quota_warning(rate_limit(75)) == "soft"
-    assert quota_warning(rate_limit(85)) == "strong"
+    assert quota_warning(rate_limit(85)) == "soft"
+    assert quota_warning(rate_limit(97)) == "strong"
 ```
 
 - [ ] **Step 2: Run tests to verify expected failure**
