@@ -1,0 +1,18 @@
+{
+  "name": "codex-handoff",
+  "version": "0.1.0",
+  "description": "Protects manual handoffs before context compaction or a low five-hour Coding Plan quota.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Handoff",
+    "shortDescription": "Prepare a deliberate Codex handoff.",
+    "longDescription": "Codex Handoff preserves project facts in a vendor-neutral Markdown handoff before context compaction or a low five-hour Coding Plan quota, while leaving the decision to start a fresh session with you.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me prepare or continue a deliberate Codex handoff."
+  }
+}
