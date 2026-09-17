@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ./hooks/context_guard.py"
+            "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ./hooks/context_guard.py"
+            "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\""
           }
         ]
       }

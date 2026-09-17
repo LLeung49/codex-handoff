@@ -143,6 +143,13 @@ class HookConfigurationTests(unittest.TestCase):
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
         self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit", "PreCompact"})
 
+    def test_hooks_resolve_the_guard_from_the_plugin_root(self):
+        """Relative paths run from the session cwd, not the plugin directory."""
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
+        for event in ("UserPromptSubmit", "PreCompact"):
+            command = hooks["hooks"][event][0]["hooks"][0]["command"]
+            self.assertIn("$PLUGIN_ROOT/hooks/context_guard.py", command)
+
 
 class SkillContractTests(unittest.TestCase):
     def test_continue_skill_forbids_automatic_execution(self):
