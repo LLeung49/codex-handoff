@@ -25,6 +25,32 @@ reliable boundary for loading new skills and hooks.
 The marketplace registration is a one-time setup per machine. Once registered,
 the install command is simply `codex plugin add codex-handoff@codex-handoff`.
 
+## Reinstall or uninstall
+
+If you installed an earlier copy locally, or want to refresh the installed
+plugin after a release, remove the installed copy and install it again from
+the registered GitHub marketplace:
+
+```bash
+codex plugin remove codex-handoff@codex-handoff
+codex plugin add codex-handoff@codex-handoff
+codex plugin list
+```
+
+You normally keep the marketplace registration: it lets you reinstall and
+receive future releases without cloning the repository. If you want to remove
+both the plugin and this marketplace from the machine, run the following only
+after the plugin removal above:
+
+```bash
+codex plugin marketplace remove codex-handoff
+```
+
+Removing the marketplace does not remove other plugins, but you will need to
+register the GitHub marketplace again before installing `codex-handoff` later.
+Start a **new Codex task** after installing or reinstalling so Codex loads the
+current skills and hooks.
+
 ## Develop from a clone
 
 Clone the repository only when you want to inspect, modify, or validate the
