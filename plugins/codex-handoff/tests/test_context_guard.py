@@ -143,7 +143,7 @@ class PluginMetadataTests(unittest.TestCase):
             if (candidate / ".agents/plugins/marketplace.json").exists()
         )
         readme = (marketplace_root / "README.md").read_text()
-        self.assertIn("codex plugin marketplace add", readme)
+        self.assertIn("codex plugin marketplace add LLeung49/codex-handoff --ref main", readme)
         self.assertIn("codex plugin add codex-handoff@codex-handoff", readme)
         self.assertNotIn("/Users/lucienleung", readme)
 

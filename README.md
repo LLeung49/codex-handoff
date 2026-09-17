@@ -7,15 +7,13 @@ continued work less useful.
 It writes vendor-neutral Markdown handoffs. You decide whether and where to
 start a fresh session; it never starts or switches sessions automatically.
 
-## Install from a clone
+## Install from GitHub
 
-Use Codex CLI to add this repository as a local Marketplace, then install its
-plugin:
+Register this public GitHub repository as a Codex marketplace, then install
+the plugin. You do not need to clone the repository:
 
 ```bash
-git clone https://github.com/LLeung49/codex-handoff.git
-cd codex-handoff
-codex plugin marketplace add "$PWD"
+codex plugin marketplace add LLeung49/codex-handoff --ref main
 codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
@@ -23,6 +21,14 @@ codex plugin list
 The final command must report `codex-handoff@codex-handoff` as `installed,
 enabled`. Start a **new Codex task** after installing; a new task is the
 reliable boundary for loading new skills and hooks.
+
+The marketplace registration is a one-time setup per machine. Once registered,
+the install command is simply `codex plugin add codex-handoff@codex-handoff`.
+
+## Develop from a clone
+
+Clone the repository only when you want to inspect, modify, or validate the
+plugin source locally.
 
 ## First live check
 
