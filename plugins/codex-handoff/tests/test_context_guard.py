@@ -166,6 +166,10 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
+    def test_plugin_manifest_uses_the_v0_1_1_release_version(self):
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+        self.assertTrue(manifest["version"].startswith("0.1.1+codex."))
+
 
 class HookConfigurationTests(unittest.TestCase):
     def test_hooks_register_prompt_and_precompact_events(self):
