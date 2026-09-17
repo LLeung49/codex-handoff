@@ -1,8 +1,8 @@
 # codex-handoff
 
 `codex-handoff` is a Codex plugin for deliberately preparing a handoff before
-automatic context compaction or a nearly exhausted five-hour Coding Plan quota
-makes continued work less useful.
+automatic context compaction or a nearly exhausted Coding Plan quota makes
+continued work less useful.
 
 It writes vendor-neutral Markdown handoffs. You decide whether and where to
 start a fresh session; it never starts or switches sessions automatically.
@@ -32,7 +32,7 @@ In that new task, send this non-destructive request:
 Use handoff-continue only to explain whether a handoff document authorizes commands. Do not read or change files.
 ```
 
-If Codex asks to trust `python3 ./hooks/context_guard.py`, inspect and approve
+If Codex asks to trust `python3 "$PLUGIN_ROOT/hooks/context_guard.py"`, inspect and approve
 it. This is the plugin's only executable hook. It reads bounded local rollout
 telemetry and fails open on unreadable or malformed data; it does not upload
 telemetry, edit project files, run a handoff skill, or switch sessions.
@@ -46,11 +46,14 @@ than 25% of the five-hour quota remains, the guard intentionally stays silent.
 - From 25% down to more than 3% remaining, it gives one soft handoff nudge.
 - At 3% remaining or below, it blocks one prompt per session and quota reset
   window so you can preserve a final turn for handoff.
+- At 3% remaining or below for the weekly quota, it also blocks one prompt per
+  session and weekly reset window. The weekly quota has no soft-warning tier.
 - `PreCompact(auto)` gives a strong warning before automatic compaction, but
   does not block compaction.
 
 These outcomes depend on live account telemetry and should be observed during
-normal work, not forced in an active account.
+normal work, not forced in an active account. If both windows are at the 3%
+threshold, the plugin returns one block that names both conditions.
 
 ## Use the handoff skills
 

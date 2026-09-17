@@ -4,7 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hooks.context_guard import handle_event, latest_primary_rate_limit, quota_warning
+from hooks.context_guard import (
+    format_hook_output,
+    handle_event,
+    latest_primary_rate_limit,
+    latest_secondary_rate_limit,
+    quota_warning,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +32,23 @@ def prompt_payload(directory, used_percent, session_id="session", resets_at=RESE
             "used_percent": used_percent,
             "resets_at": resets_at,
         }},
+    }) + "\n")
+    return {"session_id": session_id, "transcript_path": str(transcript)}
+
+
+def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id="session"):
+    """Create telemetry with a healthy 5h window and a weekly quota snapshot."""
+    transcript = Path(directory) / f"rollout-{session_id}-weekly.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "token_count",
+        "rate_limits": {
+            "primary": rate_limit(10),
+            "secondary": {
+                "window_minutes": 10080,
+                "used_percent": weekly_used_percent,
+                "resets_at": RESET,
+            },
+        },
     }) + "\n")
     return {"session_id": session_id, "transcript_path": str(transcript)}
 
@@ -59,6 +82,12 @@ class TelemetryTests(unittest.TestCase):
         rollout = ROOT / "tests/fixtures/codex-rollout.jsonl"
         self.assertEqual(latest_primary_rate_limit(rollout), {
             "window_minutes": 300, "used_percent": 97, "resets_at": 4102462800,
+        })
+
+    def test_reads_weekly_rate_limit_from_codex_rollout(self):
+        rollout = ROOT / "tests/fixtures/codex-rollout.jsonl"
+        self.assertEqual(latest_secondary_rate_limit(rollout), {
+            "window_minutes": 10080, "used_percent": 20, "resets_at": 4103049600,
         })
 
     def test_newest_unusable_primary_does_not_resurrect_older_snapshot(self):
@@ -200,6 +229,15 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
             self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
 
+    def test_weekly_limit_blocks_once_at_three_percent_remaining(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload_with_weekly_limit(directory, weekly_used_percent=97, session_id="weekly")
+            data_dir = Path(directory) / "markers"
+            first = handle_event(payload, data_dir)
+            self.assertEqual(first["decision"], "block")
+            self.assertIn("Weekly quota", first["reason"])
+            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+
     def test_soft_warning_allows_with_one_handoff_nudge(self):
         """Removing soft-level deduplication would repeat the nudge."""
         with tempfile.TemporaryDirectory() as directory:
@@ -256,3 +294,20 @@ class DecisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event({"session_id": "s"}, data_dir), {"decision": "allow"})
+
+
+class HookOutputTests(unittest.TestCase):
+    def test_allow_decision_emits_no_json(self):
+        self.assertIsNone(format_hook_output({"decision": "allow"}))
+
+    def test_soft_warning_uses_system_message(self):
+        self.assertEqual(
+            format_hook_output({"decision": "allow", "reason": "Prepare a handoff."}),
+            {"systemMessage": "Prepare a handoff."},
+        )
+
+    def test_strong_warning_keeps_the_block_schema(self):
+        self.assertEqual(
+            format_hook_output({"decision": "block", "reason": "Prepare a handoff."}),
+            {"decision": "block", "reason": "Prepare a handoff."},
+        )

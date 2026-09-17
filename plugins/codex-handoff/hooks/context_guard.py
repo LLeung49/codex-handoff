@@ -25,8 +25,8 @@ def _number(value: Any) -> int | float | None:
     return int(parsed) if parsed.is_integer() else parsed
 
 
-def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | None:
-    """Validate the newest non-null primary snapshot in a JSONL tail.
+def _latest_rate_limit(path: Path, key: str, window_minutes: int, tail_bytes: int = 262144) -> dict | None:
+    """Validate the newest non-null named rate-limit snapshot in a JSONL tail.
 
     An unusable newest snapshot fails open instead of reviving older telemetry.
     """
@@ -58,17 +58,17 @@ def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | No
         limits = event.get("rate_limits")
         if not isinstance(limits, dict):
             continue
-        primary = limits.get("primary")
-        if not isinstance(primary, dict):
+        rate_limit = limits.get(key)
+        if not isinstance(rate_limit, dict):
             continue
-        window = _number(primary.get("window_minutes"))
-        used = _number(primary.get("used_percent"))
-        resets_at = _number(primary.get("resets_at"))
-        if window != 300 or used is None or resets_at is None:
+        window = _number(rate_limit.get("window_minutes"))
+        used = _number(rate_limit.get("used_percent"))
+        resets_at = _number(rate_limit.get("resets_at"))
+        if window != window_minutes or used is None or resets_at is None:
             return None
         if not 0 <= used <= 100:
             return None
-        snapshot = dict(primary)
+        snapshot = dict(rate_limit)
         snapshot["window_minutes"] = window
         snapshot["used_percent"] = used
         snapshot["resets_at"] = resets_at
@@ -76,17 +76,27 @@ def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | No
     return None
 
 
-def quota_warning(rate_limit: dict) -> str | None:
+def latest_primary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | None:
+    """Return the newest valid five-hour quota snapshot."""
+    return _latest_rate_limit(path, "primary", 300, tail_bytes)
+
+
+def latest_secondary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | None:
+    """Return the newest valid weekly quota snapshot."""
+    return _latest_rate_limit(path, "secondary", 10080, tail_bytes)
+
+
+def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: bool = True) -> str | None:
     """Classify remaining five-hour quota as no warning, soft, or strong."""
     if not isinstance(rate_limit, dict):
         return None
-    if _number(rate_limit.get("window_minutes")) != 300:
+    if _number(rate_limit.get("window_minutes")) != window_minutes:
         return None
     used = _number(rate_limit.get("used_percent"))
     if used is None or not 0 <= used <= 100:
         return None
     remaining = 100 - used
-    if remaining > 25:
+    if remaining > 25 or (not soft_warning and remaining > 3):
         return None
     if remaining > 3:
         return "soft"
@@ -96,17 +106,21 @@ def quota_warning(rate_limit: dict) -> str | None:
 ALLOW = {"decision": "allow"}
 
 
-def _marker_path(data_dir: Path, session_id: str, resets_at: int | float, level: str) -> Path:
+def _marker_path(
+    data_dir: Path, session_id: str, resets_at: int | float, level: str, window: str
+) -> Path:
     """Create a filesystem-safe name for the documented marker key."""
-    key = json.dumps([session_id, resets_at, level], separators=(",", ":"), ensure_ascii=True)
+    key = json.dumps([session_id, resets_at, level, window], separators=(",", ":"), ensure_ascii=True)
     return data_dir / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".marker")
 
 
-def _claim_marker(data_dir: Path, session_id: str, resets_at: int | float, level: str) -> bool:
+def _claim_marker(
+    data_dir: Path, session_id: str, resets_at: int | float, level: str, window: str
+) -> bool:
     """Atomically claim a warning key, failing open if storage is unavailable."""
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        marker = _marker_path(data_dir, session_id, resets_at, level)
+        marker = _marker_path(data_dir, session_id, resets_at, level, window)
         descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)
         return True
@@ -123,6 +137,10 @@ def _strong_reason() -> str:
         "A fresh session is recommended. Run $handoff-prepare now; do not resume this "
         "same long-running session merely because the quota window resets."
     )
+
+
+def _weekly_strong_reason() -> str:
+    return "Weekly quota is nearly exhausted. Run $handoff-prepare before continuing in a fresh session."
 
 
 def handle_event(payload: dict, data_dir: Path) -> dict:
@@ -146,20 +164,33 @@ def handle_event(payload: dict, data_dir: Path) -> dict:
         transcript_path = payload.get("transcript_path")
         if not isinstance(session_id, str) or not session_id or not isinstance(transcript_path, str):
             return ALLOW
-        snapshot = latest_primary_rate_limit(Path(transcript_path))
-        if snapshot is None:
-            return ALLOW
-        level = quota_warning(snapshot)
-        if level is None:
-            return ALLOW
-        resets_at = _number(snapshot.get("resets_at"))
-        if resets_at is None or resets_at <= time.time():
-            return ALLOW
-        if not _claim_marker(Path(data_dir), session_id, resets_at, level):
-            return ALLOW
-        if level == "soft":
-            return {"decision": "allow", "reason": _soft_reason()}
-        return {"decision": "block", "reason": _strong_reason()}
+        primary = latest_primary_rate_limit(Path(transcript_path))
+        secondary = latest_secondary_rate_limit(Path(transcript_path))
+        strong_reasons = []
+        for window, snapshot, level, reason in (
+            ("five-hour", primary, quota_warning(primary) if primary else None, _strong_reason()),
+            ("weekly", secondary,
+             quota_warning(secondary, window_minutes=10080, soft_warning=False) if secondary else None,
+             _weekly_strong_reason()),
+        ):
+            if level != "strong":
+                continue
+            resets_at = _number(snapshot.get("resets_at"))
+            if resets_at is not None and resets_at > time.time() and _claim_marker(
+                Path(data_dir), session_id, resets_at, level, window
+            ):
+                strong_reasons.append(reason)
+        if strong_reasons:
+            return {"decision": "block", "reason": " ".join(strong_reasons)}
+
+        if primary:
+            level = quota_warning(primary)
+            resets_at = _number(primary.get("resets_at"))
+            if level == "soft" and resets_at is not None and resets_at > time.time() and _claim_marker(
+                Path(data_dir), session_id, resets_at, level, "five-hour"
+            ):
+                return {"decision": "allow", "reason": _soft_reason()}
+        return ALLOW
     except Exception:
         return ALLOW
 
@@ -172,13 +203,23 @@ def _plugin_data_dir() -> Path:
     return Path.home() / ".codex" / "plugin-data" / "codex-handoff"
 
 
+def format_hook_output(decision: dict) -> dict | None:
+    """Translate internal decisions to the event's valid Codex JSON contract."""
+    if decision.get("decision") == "block":
+        return {"decision": "block", "reason": decision["reason"]}
+    reason = decision.get("reason")
+    return {"systemMessage": reason} if isinstance(reason, str) and reason else None
+
+
 def main() -> None:
     """Read one hook payload from stdin and emit the Codex decision JSON."""
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
         payload = {}
-    print(json.dumps(handle_event(payload, _plugin_data_dir()), separators=(",", ":")))
+    output = format_hook_output(handle_event(payload, _plugin_data_dir()))
+    if output is not None:
+        print(json.dumps(output, separators=(",", ":")))
 
 
 if __name__ == "__main__":

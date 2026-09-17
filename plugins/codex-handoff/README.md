@@ -7,12 +7,17 @@ selected by the repository Marketplace.
 ## Local validation
 
 `codex-handoff` is a Codex-only plugin for deliberately moving work out of a
-long-running session before automatic context compaction or a low five-hour
-Coding Plan quota makes a useful handoff less likely.
+long-running session before automatic context compaction or a low Coding Plan
+quota makes a useful handoff less likely.
 
 For the five-hour quota, it gives one soft nudge between 25% and 3% remaining,
 then applies one protective block at 3% remaining or below. This leaves room
 to use nearly the whole window while preserving a final turn for handoff.
+
+For the weekly quota, it has no soft-warning tier: it applies one independent
+protective block at 3% remaining or below. Each window deduplicates against
+its own reset time; if both reach the threshold together, Codex receives one
+block that reports both conditions.
 
 It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
