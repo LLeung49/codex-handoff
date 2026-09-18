@@ -1,27 +1,18 @@
 # codex-handoff
 
-> Preserve the verified state of a long-running Codex task, then continue deliberately.
+> 在长任务的上下文或额度到达边界前，保留已核实的状态，再有意识地继续工作。
 
-`codex-handoff` is a Codex plugin for the moment when a task still matters
-but its current context or Coding Plan quota is becoming a poor place to keep
-working. It helps preserve a small, reviewable handoff package; **you** decide
-whether to open a fresh task. It never switches sessions automatically.
+`codex-handoff` 是一个 Codex 插件，适合任务仍然重要、但当前上下文或 Coding Plan 额度已不适合继续承载工作的时候。它把交接内容整理成小而可审阅的包；是否新开任务、何时继续、由谁继续，始终由**你**决定。它不会自动切换会话。
 
-Most people should never need it: if your Coding Plan quota comfortably covers
-your work, there is nothing to hand off. It exists for long-running tasks that
-outlive a five-hour window. Copying a transcript or pointing a new agent at a
-spec preserves raw material, not a bounded shared state; the next agent can
-drift, repeat work, miss priorities, and burn through its own quota rebuilding
-context. Waiting for the next window can still carry that same context cost.
+如果额度足够覆盖你的工作，大多数人不需要这个工具。它解决的是：一个长期任务尚未完成，五小时窗口却已经接近耗尽；只复制聊天记录或把 spec 交给新的 agent，传递的是原始材料，而不是有边界的共同状态。新的 agent 可能偏离目标、重复工作、遗漏重点，并在重建上下文时继续消耗额度；即使等待下一个窗口，也可能再次付出同样的上下文成本。
 
 <p align="center">
   <img src="assets/codex-handoff-00-origin-story.png" alt="额度充足时一个小黑完成大任务；额度有限时多个小黑先封装标准交接单，再由下一位继续" width="100%">
 </p>
 
-## 🚀 Install
+## 🚀 安装
 
-Register this public repository as a Codex marketplace, then install the
-plugin. No clone is needed:
+将这个公开仓库注册为 Codex marketplace，再安装插件；不需要 clone 仓库：
 
 ```bash
 codex plugin marketplace add LLeung49/codex-handoff --ref main
@@ -29,11 +20,9 @@ codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
 
-Confirm that `codex-handoff@codex-handoff` is installed and enabled, then
-start a **new Codex task**. A new task is the reliable boundary for loading
-new hooks and skills.
+确认列表显示 `codex-handoff@codex-handoff` 已安装并启用，然后新开一个 **Codex 任务**。新任务才是加载新 hook 与 skill 的可靠边界。
 
-To update an existing installation:
+升级或重新安装已有副本：
 
 ```bash
 codex plugin remove codex-handoff@codex-handoff
@@ -41,140 +30,114 @@ codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
 
-Keep the marketplace registration unless you explicitly want to remove it:
+通常应保留 marketplace 注册。只有确定不再需要时，才在移除插件后执行：
 
 ```bash
 codex plugin marketplace remove codex-handoff
 ```
 
-## Why codex-handoff?
+## 为什么需要 codex-handoff？
 
-| Problem | What the plugin protects | What remains your choice |
+| 问题 | 插件保护什么 | 仍由你决定什么 |
 | --- | --- | --- |
-| A long task outlives a quota or context window | Verified task state can be captured before a fresh task starts | Whether, when, and where to continue |
-| A new agent lacks the original scope and decisions | A handoff links the goal, evidence, relevant artifacts, and boundaries | The next authorized action |
-| Tool loops keep expanding after quota becomes scarce | The completed tool result is preserved; later supported local tools in that turn can be stopped | Whether to run `$handoff-prepare` |
-| A new window would otherwise begin by rebuilding context | A small, reviewable snapshot replaces an unbounded transcript replay | Whether to run `$handoff-prepare` |
+| 长任务超过额度或上下文窗口 | 新任务开始前可捕获已核实的任务状态 | 是否、何时、在哪里继续 |
+| 新 agent 缺少原始范围与决策 | handoff 关联目标、证据、相关产物与边界 | 下一步被授权的动作 |
+| 额度紧张后工具循环持续扩张 | 已完成的工具结果会被保留；同一轮后续受支持的本地工具可以被停止 | 是否运行 `$handoff-prepare` |
+| 新窗口原本要重新重建上下文 | 小而可审阅的快照替代无边界地重放完整聊天记录 | 是否运行 `$handoff-prepare` |
 
-The plugin is deliberately narrow: no daemon, no supervisor, no automatic
-session creation, and no automatic switching.
+这个插件的范围刻意很窄：没有 daemon、没有 supervisor、不会自动新建任务，也不会自动切换会话。
 
 <p align="center">
   <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
 </p>
 
-It carries verified task state across the boundary instead of asking a fresh
-agent to reconstruct the task from a blank slate.
+它传递的是已经核实的任务状态，而不是要求一个新的 agent 从零开始重建任务。
 
-## How it works
+## 工作方式
 
 ```text
-normal task work
+正常任务工作
       │
-      ├─ UserPromptSubmit: one protective prompt block at a strong quota threshold
-      ├─ PostToolUse: preserve a completed local-tool result and set a same-turn latch
-      └─ PreCompact(auto): give a strong handoff warning
+      ├─ UserPromptSubmit：在强阈值触发一次保护性 prompt 阻断
+      ├─ PostToolUse：保留已完成的本地工具结果，并设置同轮 latch
+      └─ PreCompact(auto)：给出强 handoff 警告
       │
       ▼
 $handoff-prepare
-      │  writes a vendor-neutral, project-local Markdown snapshot
+      │  写入一份与厂商无关、位于项目内的 Markdown 快照
       ▼
-fresh Codex task
+新的 Codex 任务
       │
       ▼
 $handoff-continue
-      │  aligns on context, scope, evidence, and open decisions — then stops
+      │  对齐上下文、范围、证据与开放决策，然后停止
       ▼
-you authorize the next scoped action
+你授权下一项有范围的动作
 ```
 
-The carry-forward illustration represents the intended behavior: carry verified work
-across the boundary instead of treating the next task as a blank slate.
+上面的“带着上下文继续”图表达的正是这一点：跨过边界时带走已核实的工作，而不是把新任务当作一张白纸。
 
 <p align="center">
   <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
 </p>
 
-## Skills
+## 技能
 
 ### 1. `$handoff-context-setup`
 
-Use this once per repository when durable project context would help.
+当项目需要长期、可复用的上下文时使用一次。它先进行只读发现，并提出下列本地文件的具体来源与内容建议：
 
-It first performs read-only discovery and proposes the exact sources and
-content for:
+- `docs/agent-context.md`：来源层级、约束、当前范围与阅读顺序
+- `docs/project-status.md`：已交付内容、进行中事项、阻塞项与等待决策
 
-- `docs/agent-context.md` — source hierarchy, constraints, active scope, and reading order
-- `docs/project-status.md` — delivered work, active item, blockers, and decisions awaiting you
-
-It waits for explicit approval before creating or materially rewriting either
-document.
+它必须等到你明确批准后，才会创建或大幅重写这两个文件。`docs/` 是本地工作材料，不会随此开源仓库发布。
 
 ### 2. `$handoff-prepare`
 
-Use this when you choose to preserve the current task.
-
-It writes one immutable `.handoff/<UTC timestamp>-<slug>.md` snapshot with
-the original objective, scope contract, required context, current state,
-decision rationale, evidence, issue triage, git state, and continuation
-contract. A handoff captures facts; it does not authorize future work.
+当你决定保留当前任务时使用。它会写入一份不可变的 `.handoff/<UTC timestamp>-<slug>.md` 快照，记录原始目标、范围约定、所需上下文、当前状态、决策理由、证据、问题分流、Git 状态与继续工作的约定。handoff 记录事实；它不授权未来工作。
 
 ### 3. `$handoff-continue`
 
-Use this in a fresh task.
+在新任务中使用。它读取仓库指令、可选的上下文索引、指定 handoff 以及 handoff 列出的任务产物，然后给出上下文对齐报告并停止。没有你的明确指示，它不会运行命令、编辑文件、测试、提交、推送或执行建议的下一步。
 
-It reads repository instructions, the optional context index, the selected
-handoff, and only the handoff's listed task artifacts. It then gives a
-context-alignment report and stops. It does not run commands, edit files, test,
-commit, push, or begin the suggested next step without your explicit direction.
+## 额度保护
 
-## Quota guard
-
-| Signal | Behavior |
+| 信号 | 行为 |
 | --- | --- |
-| Five-hour quota: 25% to more than 3% remaining | One soft `$handoff-prepare` nudge |
-| Five-hour quota: 3% or less remaining | One protective prompt block per session and reset window |
-| Weekly quota: 3% or less remaining | One independent protective prompt block per session and reset window |
-| A supported local tool observes either strong threshold | Its result remains available; the plugin supplies handoff context and latches that turn |
-| Later supported local tool in the same latched turn | `PreToolUse` can deny it before execution |
-| Automatic compaction | A strong non-blocking warning |
+| 五小时额度：剩余 25% 至高于 3% | 一次 `$handoff-prepare` 软提醒 |
+| 五小时额度：剩余 3% 或以下 | 每个会话与重置窗口各一次保护性 prompt 阻断 |
+| 周额度：剩余 3% 或以下 | 每个会话与重置窗口各一次独立的保护性 prompt 阻断 |
+| 某个受支持的本地工具观察到任一强阈值 | 保留该结果，提供 handoff 上下文，并锁存这一轮 |
+| 同一已锁存轮中的后续受支持本地工具 | `PreToolUse` 可在执行前拒绝它 |
+| 自动压缩 | 强但不阻断的提醒 |
 
-The guard is **best effort**. It does not observe every model action, and
-hosted or special tool paths may bypass local hooks. Do not exhaust quota
-to test it. When normal work naturally reaches 3% or less, a safe observation
-is to request two harmless local commands; either the prompt guard blocks
-before work begins, or the first completed tool result is retained and the
-second supported local tool is denied.
+额度保护只是**尽力而为**：它无法观察每一个模型动作，托管或特殊工具路径可能绕过本地 hook。不要为了测试而耗尽额度。当日常工作自然到达 3% 或以下时，可以请求两个无害的本地命令：要么 prompt guard 在工作开始前阻断，要么第一个已完成的工具结果会被保留，第二个受支持的本地工具会被拒绝。
 
-Plugin data markers are opaque, local, zero-content dedupe/latch files. They
-are not project `.handoff/` documents and do not contain handoff content.
+插件数据标记是本地、零内容的去重/latch 文件；它们不是项目的 `.handoff/` 文档，也不保存 handoff 内容。
 
 <p align="center">
   <img src="assets/codex-handoff-03-quota-guard.png" alt="小黑保存已完成结果，并在额度低时停止后续工具调用" width="100%">
 </p>
 
-## First check
+## 第一次检查
 
-In a new Codex task, send:
+在新开的 Codex 任务中发送：
 
 ```text
-Use $handoff-context-setup only to inspect this repository and propose the context-document sources. Do not create or change files. Stop after the proposal.
+只使用 $handoff-context-setup 检查这个仓库，并提出上下文文档来源建议。不要创建或修改文件。提出建议后停止。
 ```
 
-The expected result is a proposal only—no durable document writes. If Codex
-asks to trust the plugin hook, inspect that it is only:
+预期结果只是建议，不会写入长期文件。如果 Codex 请求信任插件 hook，请确认它只有：
 
 ```text
 python3 "$PLUGIN_ROOT/hooks/context_guard.py"
 ```
 
-That hook reads a bounded local telemetry tail, fails open on unreadable or
-malformed data, and does not upload telemetry, edit project files, invoke
-skills, or switch tasks.
+这个 hook 只读取有边界的本地 rollout telemetry 尾部；在数据无法读取或格式错误时会 fail-open。它不会上传 telemetry、编辑项目文件、调用 handoff skill 或切换会话。
 
-## Development notes
+## 本地开发
 
-Clone the repository only when you want to modify or validate the plugin:
+只有在你希望修改或验证插件时才需要 clone：
 
 ```bash
 git clone https://github.com/LLeung49/codex-handoff.git
@@ -182,6 +145,4 @@ cd codex-handoff/plugins/codex-handoff
 python3 -m unittest discover -s tests -v
 ```
 
-For complete plugin and skill validation commands, see
-[the plugin source README](plugins/codex-handoff/README.md). The V1 and V2
-design records remain available under [docs/superpowers/specs](docs/superpowers/specs/).
+完整的插件与 skill 验证命令见 [插件源码 README](plugins/codex-handoff/README.md)。

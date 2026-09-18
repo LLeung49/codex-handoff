@@ -192,8 +192,8 @@ class PluginMetadataTests(unittest.TestCase):
         readme = " ".join((marketplace_root / "README.md").read_text().split())
         for requirement in (
             "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
-            "PostToolUse", "PreToolUse", "best effort", "never switches sessions automatically",
-            "completed tool result is preserved", "hosted or special tool paths",
+            "PostToolUse", "PreToolUse", "尽力而为", "不会自动切换会话",
+            "已完成的工具结果会被保留", "托管或特殊工具路径",
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
@@ -205,8 +205,8 @@ class PluginMetadataTests(unittest.TestCase):
             if (candidate / ".agents/plugins/marketplace.json").exists()
         )
         readme = (marketplace_root / "README.md").read_text()
-        for heading in ("## 🚀 Install", "## Why codex-handoff?", "## How it works",
-                        "## Skills", "## Quota guard"):
+        for heading in ("## 🚀 安装", "## 为什么需要 codex-handoff？", "## 工作方式",
+                        "## 技能", "## 额度保护"):
             with self.subTest(heading=heading):
                 self.assertIn(heading, readme)
         self.assertIn("assets/codex-handoff-01-carry-forward.png", readme)
@@ -231,6 +231,16 @@ class PluginMetadataTests(unittest.TestCase):
             with self.subTest(illustration=illustration):
                 self.assertIn(illustration, readme)
                 self.assertTrue((marketplace_root / illustration).is_file())
+
+    def test_root_readme_does_not_link_to_local_docs(self):
+        """Published onboarding must not link to user-local documentation."""
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = (marketplace_root / "README.md").read_text()
+        self.assertNotIn("docs/superpowers", readme)
+        self.assertIn("/docs/", (marketplace_root / ".gitignore").read_text())
 
     def test_plugin_readme_validates_all_v2_skills(self):
         """A released V2 plugin must validate the newly added setup skill."""
