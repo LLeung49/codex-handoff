@@ -132,6 +132,11 @@ def _marker_exists(data_dir: Path, *key_parts: object) -> bool:
         return False
 
 
+def _turn_latch_dir(data_dir: Path, session_id: str, turn_id: str) -> Path:
+    """Group full-key latches for lookup without rereading quota telemetry."""
+    return _marker_path(data_dir, session_id, turn_id, "tool-stop").with_suffix(".latches")
+
+
 def claim_turn_latch(
     data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
 ) -> bool:
@@ -142,7 +147,10 @@ def claim_turn_latch(
         return False
     if _number(resets_at) is None or not isinstance(window, str) or not window:
         return False
-    return _claim_marker(data_dir, session_id, turn_id, resets_at, "tool-stop", window)
+    return _claim_marker(
+        _turn_latch_dir(data_dir, session_id, turn_id),
+        session_id, turn_id, resets_at, "tool-stop", window,
+    )
 
 
 def turn_latch_exists(
@@ -155,7 +163,10 @@ def turn_latch_exists(
         return False
     if _number(resets_at) is None or not isinstance(window, str) or not window:
         return False
-    return _marker_exists(data_dir, session_id, turn_id, resets_at, "tool-stop", window)
+    return _marker_exists(
+        _turn_latch_dir(data_dir, session_id, turn_id),
+        session_id, turn_id, resets_at, "tool-stop", window,
+    )
 
 
 def _soft_reason() -> str:
@@ -272,6 +283,32 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
         return ALLOW
 
 
+def handle_pre_tool_use(payload: dict, data_dir: Path) -> dict:
+    """Deny only an existing same-turn latch; never detect quota here."""
+    try:
+        if not isinstance(payload, dict) or "agent_id" in payload:
+            return ALLOW
+        session_id = payload.get("session_id")
+        turn_id = payload.get("turn_id")
+        if not isinstance(session_id, str) or not session_id:
+            return ALLOW
+        if not isinstance(turn_id, str) or not turn_id:
+            return ALLOW
+        latch_dir = _turn_latch_dir(Path(data_dir), session_id, turn_id)
+        if any(marker.is_file() for marker in latch_dir.glob("*.marker")):
+            return {
+                "decision": "block",
+                "reason": (
+                    "This turn has already reached the quota guard. Stop expanding work, "
+                    "summarize the current state, and ask the user to run $handoff-prepare "
+                    "in a new turn before continuing."
+                ),
+            }
+        return ALLOW
+    except Exception:
+        return ALLOW
+
+
 def handle_event(payload: dict, data_dir: Path) -> dict:
     """Route a hook payload while retaining the direct V1 payload contract."""
     try:
@@ -282,6 +319,8 @@ def handle_event(payload: dict, data_dir: Path) -> dict:
             return handle_precompact(payload, data_dir)
         if event_name == "PostToolUse":
             return handle_post_tool_use(payload, data_dir)
+        if event_name == "PreToolUse":
+            return handle_pre_tool_use(payload, data_dir)
         if event_name == "UserPromptSubmit":
             return handle_user_prompt(payload, data_dir)
         if event_name:
@@ -303,12 +342,30 @@ def _plugin_data_dir() -> Path:
     return Path.home() / ".codex" / "plugin-data" / "codex-handoff"
 
 
-def format_hook_output(decision: dict) -> dict | None:
+def format_hook_output(payload: dict, decision: dict) -> dict | None:
     """Translate internal decisions to the event's valid Codex JSON contract."""
-    if decision.get("decision") == "block":
-        return {"decision": "block", "reason": decision["reason"]}
     reason = decision.get("reason")
-    return {"systemMessage": reason} if isinstance(reason, str) and reason else None
+    if not isinstance(reason, str) or not reason:
+        return None
+    event_name = payload.get("hook_event_name") if isinstance(payload, dict) else None
+    if event_name == "PostToolUse":
+        return {
+            "systemMessage": reason,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse", "additionalContext": reason,
+            },
+        }
+    if event_name == "PreToolUse" and decision.get("decision") == "block":
+        return {
+            "systemMessage": reason,
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            },
+        }
+    if event_name in (None, "UserPromptSubmit") and decision.get("decision") == "block":
+        return {"decision": "block", "reason": reason}
+    return {"systemMessage": reason}
 
 
 def main() -> None:
@@ -317,7 +374,7 @@ def main() -> None:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
         payload = {}
-    output = format_hook_output(handle_event(payload, _plugin_data_dir()))
+    output = format_hook_output(payload, handle_event(payload, _plugin_data_dir()))
     if output is not None:
         print(json.dumps(output, separators=(",", ":")))
 

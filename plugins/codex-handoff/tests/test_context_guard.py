@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -205,16 +208,29 @@ class PluginMetadataTests(unittest.TestCase):
 
 
 class HookConfigurationTests(unittest.TestCase):
-    def test_hooks_register_prompt_and_precompact_events(self):
+    def test_hooks_register_all_four_lifecycle_events(self):
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
-        self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit", "PreCompact"})
+        self.assertEqual(set(hooks["hooks"]), {
+            "UserPromptSubmit", "PreCompact", "PostToolUse", "PreToolUse",
+        })
 
     def test_hooks_resolve_the_guard_from_the_plugin_root(self):
         """Relative paths run from the session cwd, not the plugin directory."""
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
-        for event in ("UserPromptSubmit", "PreCompact"):
+        for event in hooks["hooks"]:
             command = hooks["hooks"][event][0]["hooks"][0]["command"]
-            self.assertIn("$PLUGIN_ROOT/hooks/context_guard.py", command)
+            self.assertEqual(command, 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
+
+    def test_tool_hooks_match_all_tools_synchronously(self):
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
+        for event in ("PreToolUse", "PostToolUse"):
+            self.assertEqual(hooks.get(event), [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"',
+                }],
+            }])
 
 
 class SkillContractTests(unittest.TestCase):
@@ -443,16 +459,139 @@ class ToolLoopTests(unittest.TestCase):
 
 class HookOutputTests(unittest.TestCase):
     def test_allow_decision_emits_no_json(self):
-        self.assertIsNone(format_hook_output({"decision": "allow"}))
+        for event in ("UserPromptSubmit", "PreCompact", "PostToolUse", "PreToolUse"):
+            self.assertIsNone(format_hook_output({"hook_event_name": event}, ALLOW))
 
     def test_soft_warning_uses_system_message(self):
         self.assertEqual(
-            format_hook_output({"decision": "allow", "reason": "Prepare a handoff."}),
+            format_hook_output({"hook_event_name": "UserPromptSubmit"},
+                               {"decision": "allow", "reason": "Prepare a handoff."}),
             {"systemMessage": "Prepare a handoff."},
         )
 
     def test_strong_warning_keeps_the_block_schema(self):
         self.assertEqual(
-            format_hook_output({"decision": "block", "reason": "Prepare a handoff."}),
+            format_hook_output({"hook_event_name": "UserPromptSubmit"},
+                               {"decision": "block", "reason": "Prepare a handoff."}),
             {"decision": "block", "reason": "Prepare a handoff."},
         )
+
+
+class ToolLoopOutputTests(unittest.TestCase):
+    def test_pre_tool_denies_only_same_turn_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            self.assertTrue(claim_turn_latch(data_dir, "s", "t1", RESET, "five-hour"))
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t1"}
+            decision = handle_event(payload, data_dir)
+            self.assertEqual(decision.get("decision"), "block")
+            message = decision["reason"]
+            self.assertIn("$handoff-prepare", message)
+            self.assertEqual(format_hook_output(payload, decision), {
+                "systemMessage": message,
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": message,
+                },
+            })
+            self.assertEqual(handle_event({**payload, "turn_id": "t2"}, data_dir), ALLOW)
+            self.assertEqual(handle_event({**payload, "session_id": "other"}, data_dir), ALLOW)
+
+    def test_pre_tool_bypasses_subagents_and_invalid_identifiers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "weekly")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            for overrides in ({"agent_id": "child"}, {"agent_id": None},
+                              {"session_id": None}, {"turn_id": ""}, {"turn_id": []}):
+                with self.subTest(overrides=overrides):
+                    self.assertEqual(handle_event({**payload, **overrides}, data_dir), ALLOW)
+
+    def test_pre_tool_never_detects_quota_without_post_tool_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = post_tool_payload(directory, primary_used_percent=100, weekly_used_percent=100)
+            payload["hook_event_name"] = "PreToolUse"
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            self.assertFalse(data_dir.exists())
+
+    def test_pre_tool_observes_latch_with_unreadable_transcript(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "weekly")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t",
+                       "transcript_path": str(Path(directory) / "missing.jsonl")}
+            self.assertEqual(handle_event(payload, data_dir).get("decision"), "block")
+
+    def test_pre_tool_missing_or_unavailable_storage_fails_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            self.assertFalse(data_dir.exists())
+            data_dir.write_text("not a directory")
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+
+    def test_pre_tool_unreadable_storage_fails_open(self):
+        if os.geteuid() == 0:
+            self.skipTest("Root can read directories with access removed")
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "five-hour")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            data_dir.chmod(0)
+            try:
+                self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            finally:
+                data_dir.chmod(0o700)
+
+    def test_post_tool_message_does_not_replace_result(self):
+        message = "Stop expanding work and prepare a handoff."
+        output = format_hook_output({"hook_event_name": "PostToolUse"}, {
+            "decision": "allow", "reason": message, "tool_stop": True,
+        })
+        self.assertEqual(output, {
+            "systemMessage": message,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse", "additionalContext": message,
+            },
+        })
+
+    def test_precompact_message_remains_nonblocking(self):
+        payload = {"hook_event_name": "PreCompact", "trigger": "auto"}
+        with tempfile.TemporaryDirectory() as directory:
+            decision = handle_event(payload, Path(directory))
+            self.assertEqual(format_hook_output(payload, decision), {
+                "systemMessage": decision["reason"],
+            })
+
+    def test_real_hook_process_preserves_post_tool_result_then_denies_same_turn(self):
+        """Catch a stale main formatter call or process-local latch storage."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = post_tool_payload(directory, primary_used_percent=97)
+            payload["tool_response"] = {"output": "completed tool evidence"}
+            data_dir = Path(directory) / "markers"
+
+            def run_hook(event_payload):
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "hooks/context_guard.py")],
+                    input=json.dumps(event_payload), text=True, capture_output=True,
+                    env={**os.environ, "PLUGIN_DATA": str(data_dir)}, check=True, timeout=10,
+                )
+                self.assertEqual(result.stderr, "")
+                return json.loads(result.stdout) if result.stdout else None
+
+            post_output = run_hook(payload)
+            self.assertEqual(set(post_output), {"systemMessage", "hookSpecificOutput"})
+            self.assertEqual(post_output["hookSpecificOutput"], {
+                "hookEventName": "PostToolUse", "additionalContext": post_output["systemMessage"],
+            })
+            pre_payload = {"hook_event_name": "PreToolUse", "session_id": "session", "turn_id": "turn"}
+            pre_output = run_hook(pre_payload)
+            self.assertEqual(pre_output["hookSpecificOutput"], {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": pre_output["systemMessage"],
+            })
+            self.assertIsNone(run_hook({**pre_payload, "turn_id": "new-turn"}))
+            self.assertIsNone(run_hook({**payload, "hook_event_name": "UserPromptSubmit"}))
