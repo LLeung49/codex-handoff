@@ -2,14 +2,21 @@
 
 > Preserve the verified state of a long-running Codex task, then continue deliberately.
 
-<p align="center">
-  <img src="assets/codex-handoff-bridge.png" alt="A verified handoff carried from a low-quota workspace to a fresh one" width="100%">
-</p>
-
 `codex-handoff` is a Codex plugin for the moment when a task still matters
 but its current context or Coding Plan quota is becoming a poor place to keep
 working. It helps preserve a small, reviewable handoff package; **you** decide
 whether to open a fresh task. It never switches sessions automatically.
+
+Most people should never need it: if your Coding Plan quota comfortably covers
+your work, there is nothing to hand off. It exists for long-running tasks that
+outlive a five-hour window. Copying a transcript or pointing a new agent at a
+spec preserves raw material, not a bounded shared state; the next agent can
+drift, repeat work, miss priorities, and burn through its own quota rebuilding
+context. Waiting for the next window can still carry that same context cost.
+
+<p align="center">
+  <img src="assets/codex-handoff-00-origin-story.png" alt="额度充足时一个小黑完成大任务；额度有限时多个小黑先封装标准交接单，再由下一位继续" width="100%">
+</p>
 
 ## 🚀 Install
 
@@ -44,12 +51,20 @@ codex plugin marketplace remove codex-handoff
 
 | Problem | What the plugin protects | What remains your choice |
 | --- | --- | --- |
-| A task approaches a quota or context boundary | Verified task state can be captured before a fresh task starts | Whether, when, and where to continue |
+| A long task outlives a quota or context window | Verified task state can be captured before a fresh task starts | Whether, when, and where to continue |
 | A new agent lacks the original scope and decisions | A handoff links the goal, evidence, relevant artifacts, and boundaries | The next authorized action |
 | Tool loops keep expanding after quota becomes scarce | The completed tool result is preserved; later supported local tools in that turn can be stopped | Whether to run `$handoff-prepare` |
+| A new window would otherwise begin by rebuilding context | A small, reviewable snapshot replaces an unbounded transcript replay | Whether to run `$handoff-prepare` |
 
 The plugin is deliberately narrow: no daemon, no supervisor, no automatic
 session creation, and no automatic switching.
+
+<p align="center">
+  <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
+</p>
+
+It carries verified task state across the boundary instead of asking a fresh
+agent to reconstruct the task from a blank slate.
 
 ## How it works
 
@@ -73,8 +88,12 @@ $handoff-continue
 you authorize the next scoped action
 ```
 
-The illustration above represents the intended behavior: carry verified work
+The carry-forward illustration represents the intended behavior: carry verified work
 across the boundary instead of treating the next task as a blank slate.
+
+<p align="center">
+  <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
+</p>
 
 ## Skills
 
@@ -129,6 +148,10 @@ second supported local tool is denied.
 
 Plugin data markers are opaque, local, zero-content dedupe/latch files. They
 are not project `.handoff/` documents and do not contain handoff content.
+
+<p align="center">
+  <img src="assets/codex-handoff-03-quota-guard.png" alt="小黑保存已完成结果，并在额度低时停止后续工具调用" width="100%">
+</p>
 
 ## First check
 

@@ -199,7 +199,7 @@ class PluginMetadataTests(unittest.TestCase):
                 self.assertIn(requirement, readme)
 
     def test_root_readme_has_the_scannable_open_source_sections(self):
-        """Keep the public README's onboarding modules and original hero asset."""
+        """Keep the public README's onboarding modules and current hero asset."""
         marketplace_root = next(
             candidate for candidate in (ROOT, *ROOT.parents)
             if (candidate / ".agents/plugins/marketplace.json").exists()
@@ -209,8 +209,28 @@ class PluginMetadataTests(unittest.TestCase):
                         "## Skills", "## Quota guard"):
             with self.subTest(heading=heading):
                 self.assertIn(heading, readme)
-        self.assertIn("assets/codex-handoff-bridge.png", readme)
-        self.assertTrue((marketplace_root / "assets/codex-handoff-bridge.png").is_file())
+        self.assertIn("assets/codex-handoff-01-carry-forward.png", readme)
+        self.assertTrue(
+            (marketplace_root / "assets/codex-handoff-01-carry-forward.png").is_file()
+        )
+
+    def test_root_readme_keeps_its_four_chinese_handoff_illustrations(self):
+        """Keep each visual explanation linked to a shipped project asset."""
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = (marketplace_root / "README.md").read_text()
+        illustrations = (
+            "assets/codex-handoff-00-origin-story.png",
+            "assets/codex-handoff-01-carry-forward.png",
+            "assets/codex-handoff-02-handoff-envelope.png",
+            "assets/codex-handoff-03-quota-guard.png",
+        )
+        for illustration in illustrations:
+            with self.subTest(illustration=illustration):
+                self.assertIn(illustration, readme)
+                self.assertTrue((marketplace_root / illustration).is_file())
 
     def test_plugin_readme_validates_all_v2_skills(self):
         """A released V2 plugin must validate the newly added setup skill."""
