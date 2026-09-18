@@ -23,11 +23,35 @@ It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.
 
+## V2 durable context and migration
+
+V1 handoffs still work unchanged. V2 durable context documents are opt-in:
+run `$handoff-context-setup` when you want a read-only proposal and, after
+explicit approval, durable project context. It does not create those documents
+as a handoff side effect. Use `$handoff-prepare` for one immutable handoff
+snapshot and `$handoff-continue` in a fresh task for its briefing.
+
+The plugin's data markers are opaque, local, zero-content dedupe/latch files.
+They are not project `.handoff/` documents and contain no handoff content.
+
+## V2 quota guard limits
+
+At the strong threshold, `PostToolUse` keeps a completed tool result available
+and records a same-turn latch. A subsequent supported local tool can be denied
+by `PreToolUse` with a handoff message. This guard is best effort: it cannot
+observe every model action, and hosted or special tool paths may bypass it.
+Invoke `$handoff-prepare` deliberately when you need a handoff; the guard does
+not switch sessions automatically.
+
+For safe live validation, run synthetic hook tests first. Then, only when
+normal work naturally reaches the threshold, observe one harmless supported
+local tool; do not consume quota just to force the case.
+
 ## Deliberate new-session workflow
 
-When prompted, run `handoff-prepare` to write a handoff document, review it,
+When prompted, run `$handoff-prepare` to write a handoff document, review it,
 and choose when and where to start a fresh Codex session. In that new session,
-run `handoff-continue` to read the handoff and receive a briefing. A handoff is
+run `$handoff-continue` to read the handoff and receive a briefing. A handoff is
 context, not authorization: it does not authorize edits, commands, or its
 listed next step without your explicit direction.
 
@@ -50,6 +74,7 @@ VALIDATOR_PYTHON="$PWD/work/validator-venv/bin/python"
 SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
 "$VALIDATOR_PYTHON" -m unittest discover -s tests -v
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/plugin-creator/scripts/validate_plugin.py" .
+"$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-context-setup
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-prepare
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-continue
 ```
@@ -57,7 +82,7 @@ SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
 The PyYAML installation requires access to your configured Python package
 index on first setup. If your Codex runtime or system skills live elsewhere,
 adjust `BUNDLED_PYTHON` or `SYSTEM_SKILLS` to their installed locations. A local
-Python 3.10+ can also create the environment. All four validation commands
+Python 3.10+ can also create the environment. All five validation commands
 must exit successfully; the validators print `Plugin validation passed` and
 `Skill is valid!` for each skill.
 

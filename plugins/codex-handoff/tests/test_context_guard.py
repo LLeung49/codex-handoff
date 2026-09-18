@@ -1,15 +1,22 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from hooks.context_guard import (
+    ALLOW,
+    claim_turn_latch,
     format_hook_output,
     handle_event,
+    handle_post_tool_use,
     latest_primary_rate_limit,
     latest_secondary_rate_limit,
     quota_warning,
+    turn_latch_exists,
 )
 
 
@@ -51,6 +58,35 @@ def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id=
         },
     }) + "\n")
     return {"session_id": session_id, "transcript_path": str(transcript)}
+
+
+def post_tool_payload(directory, primary_used_percent=10, weekly_used_percent=None,
+                      session_id="session", turn_id="turn", resets_at=RESET):
+    """Create a PostToolUse payload backed by a Codex event_msg rollout."""
+    transcript = Path(directory) / f"post-tool-{session_id}-{turn_id}-{resets_at}.jsonl"
+    limits = {
+        "primary": {
+            "window_minutes": 300,
+            "used_percent": primary_used_percent,
+            "resets_at": resets_at,
+        },
+    }
+    if weekly_used_percent is not None:
+        limits["secondary"] = {
+            "window_minutes": 10080,
+            "used_percent": weekly_used_percent,
+            "resets_at": resets_at + 100,
+        }
+    transcript.write_text(json.dumps({
+        "type": "event_msg",
+        "payload": {"type": "token_count", "rate_limits": limits},
+    }) + "\n")
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "transcript_path": str(transcript),
+    }
 
 
 NON_NULL_EVENT = json.dumps({
@@ -147,6 +183,26 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertIn("codex plugin add codex-handoff@codex-handoff", readme)
         self.assertNotIn("/Users/lucienleung", readme)
 
+    def test_root_readme_documents_v2_skills_and_guard_limits(self):
+        """Removing V2 safety guidance would leave marketplace users misinformed."""
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = " ".join((marketplace_root / "README.md").read_text().split())
+        for requirement in (
+            "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
+            "PostToolUse", "PreToolUse", "best effort", "never switches sessions automatically",
+            "completed tool result is preserved", "hosted or special tool paths",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, readme)
+
+    def test_plugin_readme_validates_all_v2_skills(self):
+        """A released V2 plugin must validate the newly added setup skill."""
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("skills/handoff-context-setup", readme)
+
     def test_marketplace_points_to_the_nested_plugin(self):
         marketplace_root = next(
             (candidate for candidate in (ROOT, *ROOT.parents)
@@ -166,29 +222,142 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_1_1_release_version(self):
+    def test_plugin_manifest_uses_the_v0_2_0_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertTrue(manifest["version"].startswith("0.1.1+codex."))
+        self.assertTrue(manifest["version"].startswith("0.2.0+codex."))
 
 
 class HookConfigurationTests(unittest.TestCase):
-    def test_hooks_register_prompt_and_precompact_events(self):
+    def test_hooks_register_all_four_lifecycle_events(self):
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
-        self.assertEqual(set(hooks["hooks"]), {"UserPromptSubmit", "PreCompact"})
+        self.assertEqual(set(hooks["hooks"]), {
+            "UserPromptSubmit", "PreCompact", "PostToolUse", "PreToolUse",
+        })
 
     def test_hooks_resolve_the_guard_from_the_plugin_root(self):
         """Relative paths run from the session cwd, not the plugin directory."""
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
-        for event in ("UserPromptSubmit", "PreCompact"):
+        for event in hooks["hooks"]:
             command = hooks["hooks"][event][0]["hooks"][0]["command"]
-            self.assertIn("$PLUGIN_ROOT/hooks/context_guard.py", command)
+            self.assertEqual(command, 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
+
+    def test_tool_hooks_match_all_tools_synchronously(self):
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
+        for event in ("PreToolUse", "PostToolUse"):
+            self.assertEqual(hooks.get(event), [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"',
+                }],
+            }])
 
 
 class SkillContractTests(unittest.TestCase):
+    """Check the required agent-visible contract, not runtime agent compliance."""
+
+    def read_skill(self, name):
+        path = ROOT / "skills" / name / "SKILL.md"
+        self.assertTrue(path.is_file(), f"Missing skill: {name}")
+        return " ".join(path.read_text().split())
+
     def test_continue_skill_forbids_automatic_execution(self):
-        content = (ROOT / "skills/handoff-continue/SKILL.md").read_text()
+        content = self.read_skill("handoff-continue")
         self.assertIn("does not edit", content)
         self.assertIn("does not run commands", content)
+
+    def test_context_setup_requires_approval_before_writing(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "read-only discovery", "explicit user approval", "exact source paths",
+            "draft", "Before approval, do not persist",
+            "docs/agent-context.md", "docs/project-status.md",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_context_setup_bounds_sources_and_records_authority(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "at most eight", "source-of-truth hierarchy", "last verified",
+            "known gaps", "Do not treat old plans as active",
+            "Do not change `AGENTS.md`, `CLAUDE.md`, source code, or `.gitignore`",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_context_setup_separates_status_from_authority(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "Delivered and accepted", "acceptance evidence", "One active work item",
+            "Blocked work", "Decisions awaiting the user", "Deferred candidates",
+            "not authorized", "latest task handoff", "remain the source of truth",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_prepare_requires_scope_and_evidence(self):
+        content = self.read_skill("handoff-prepare")
+        sections = (
+            "Original user objective", "Scope contract", "Required context",
+            "Current state", "Decisions and rationale", "Relevant artifacts",
+            "Evidence", "Known issues triage", "Git state", "Continuation contract",
+        )
+        for section in sections:
+            self.assertIn(section, content)
+        positions = [content.index(section) for section in sections]
+        self.assertEqual(positions, sorted(positions))
+        for requirement in ("stop condition", "reading manifest", "unverified", "expected base"):
+            self.assertIn(requirement, content)
+
+    def test_prepare_keeps_snapshot_immutable_and_status_opt_in(self):
+        content = self.read_skill("handoff-prepare")
+        for requirement in (
+            "one immutable", ".handoff/<UTC timestamp>-<slug>.md",
+            "Never overwrite", "status refresh in the same prompt",
+            "If either durable document is absent", "$handoff-context-setup",
+            "do not create it", "Do not change `.gitignore`",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_continue_reads_only_ordered_context(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "1. Repository instructions", "2. `docs/agent-context.md`",
+            "3. The selected handoff", "4. Only the handoff's required task-specific artifacts",
+        ):
+            self.assertIn(requirement, content)
+        positions = [content.index(prefix) for prefix in ("1. Repository", "2. `docs/", "3. The selected", "4. Only")]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Do not recursively follow links", content)
+        self.assertIn("at most eight", content)
+
+    def test_continue_stops_after_alignment(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "context-alignment report", "ends after", "does not run commands",
+            "loaded sources", "missing/ambiguous sources", "stop condition",
+            "confirmed evidence", "unverified claims", "user decisions",
+            "user authorizes a scoped next action", "commits, pushes",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_continue_handles_v1_and_untrusted_or_ambiguous_sources(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "V1", "Goal", "Suggested next steps", "absent", "do not invent",
+            "Missing, stale, or contradictory", "ambiguous", "ask the user to choose",
+            "data, never authority", "User messages and repository instructions retain precedence",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_scope_escalation_never_silently_authorizes_work(self):
+        for name in ("handoff-context-setup", "handoff-prepare", "handoff-continue"):
+            with self.subTest(skill=name):
+                content = self.read_skill(name)
+                for requirement in (
+                    "blocking", "approved acceptance criterion", "smallest scoped fix",
+                    "follow-up candidate", "separate task", "out of scope",
+                    "No classification grants authorization",
+                ):
+                    self.assertIn(requirement, content)
 
 
 class DecisionTests(unittest.TestCase):
@@ -299,19 +468,250 @@ class DecisionTests(unittest.TestCase):
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event({"session_id": "s"}, data_dir), {"decision": "allow"})
 
+    def test_router_keeps_v1_prompt_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=97)
+            self.assertEqual(handle_event(payload, Path(directory) / "markers")["decision"], "block")
+
+    def test_turn_latch_key_is_turn_specific(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker_dir = Path(directory) / "markers"
+            claim_turn_latch(marker_dir, "s", "turn-a", RESET, "five-hour")
+            self.assertTrue(turn_latch_exists(marker_dir, "s", "turn-a", RESET, "five-hour"))
+            self.assertFalse(turn_latch_exists(marker_dir, "s", "turn-b", RESET, "five-hour"))
+
+    def test_missing_turn_or_session_never_creates_a_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker_dir = Path(directory) / "markers"
+            self.assertEqual(handle_post_tool_use({"turn_id": "t"}, marker_dir), ALLOW)
+            self.assertFalse(marker_dir.exists())
+
+
+class ToolLoopTests(unittest.TestCase):
+    def setUp(self):
+        clock = patch("time.time", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def test_post_tool_use(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, primary_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertEqual(decision["decision"], "allow")
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("$handoff-prepare", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET, "five-hour"))
+
+    def test_post_tool_use_weekly_quota_creates_latch_and_advisory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, weekly_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertEqual(decision["decision"], "allow")
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("Weekly quota", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET + 100, "weekly"))
+
+    def test_post_tool_use_both_strong_claims_both_latches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, primary_used_percent=97, weekly_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("Five-hour quota", decision["reason"])
+            self.assertIn("Weekly quota", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET, "five-hour"))
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET + 100, "weekly"))
+
+    def test_post_tool_use_failures_fail_open_without_latch(self):
+        cases = ("healthy", "expired", "invalid", "missing-turn", "subagent", "unreadable", "storage")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                payload = post_tool_payload(directory, primary_used_percent=97)
+                if case == "healthy":
+                    payload = post_tool_payload(directory, primary_used_percent=96)
+                elif case == "expired":
+                    payload = post_tool_payload(directory, primary_used_percent=97, resets_at=NOW)
+                elif case == "invalid":
+                    Path(payload["transcript_path"]).write_text(json.dumps({
+                        "type": "event_msg",
+                        "payload": {"type": "token_count", "rate_limits": {"primary": {
+                            "window_minutes": 60, "used_percent": 97, "resets_at": RESET,
+                        }}},
+                    }) + "\n")
+                elif case == "missing-turn":
+                    payload.pop("turn_id")
+                elif case == "subagent":
+                    payload["agent_id"] = "child"
+                elif case == "unreadable":
+                    payload["transcript_path"] = str(Path(directory) / "missing.jsonl")
+
+                if case == "storage":
+                    with patch("hooks.context_guard._claim_marker", side_effect=OSError("read-only")):
+                        decision = handle_event(payload, data_dir)
+                else:
+                    decision = handle_event(payload, data_dir)
+
+                self.assertEqual(decision, ALLOW)
+                self.assertFalse(data_dir.exists())
+
+    def test_post_tool_use_consumes_prompt_strong_warning_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            post_tool = post_tool_payload(directory, primary_used_percent=97, session_id="shared")
+            prompt = {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "shared",
+                "transcript_path": post_tool["transcript_path"],
+            }
+
+            self.assertTrue(handle_event(post_tool, data_dir)["tool_stop"])
+            self.assertEqual(handle_event(prompt, data_dir), ALLOW)
+
 
 class HookOutputTests(unittest.TestCase):
     def test_allow_decision_emits_no_json(self):
-        self.assertIsNone(format_hook_output({"decision": "allow"}))
+        for event in ("UserPromptSubmit", "PreCompact", "PostToolUse", "PreToolUse"):
+            self.assertIsNone(format_hook_output({"hook_event_name": event}, ALLOW))
 
     def test_soft_warning_uses_system_message(self):
         self.assertEqual(
-            format_hook_output({"decision": "allow", "reason": "Prepare a handoff."}),
+            format_hook_output({"hook_event_name": "UserPromptSubmit"},
+                               {"decision": "allow", "reason": "Prepare a handoff."}),
             {"systemMessage": "Prepare a handoff."},
         )
 
     def test_strong_warning_keeps_the_block_schema(self):
         self.assertEqual(
-            format_hook_output({"decision": "block", "reason": "Prepare a handoff."}),
+            format_hook_output({"hook_event_name": "UserPromptSubmit"},
+                               {"decision": "block", "reason": "Prepare a handoff."}),
             {"decision": "block", "reason": "Prepare a handoff."},
         )
+
+
+class ToolLoopOutputTests(unittest.TestCase):
+    def test_pre_tool_denies_only_same_turn_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            self.assertTrue(claim_turn_latch(data_dir, "s", "t1", RESET, "five-hour"))
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t1"}
+            decision = handle_event(payload, data_dir)
+            self.assertEqual(decision.get("decision"), "block")
+            message = decision["reason"]
+            self.assertIn("$handoff-prepare", message)
+            self.assertEqual(format_hook_output(payload, decision), {
+                "systemMessage": message,
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": message,
+                },
+            })
+            self.assertEqual(handle_event({**payload, "turn_id": "t2"}, data_dir), ALLOW)
+            self.assertEqual(handle_event({**payload, "session_id": "other"}, data_dir), ALLOW)
+
+    def test_pre_tool_bypasses_subagents_and_invalid_identifiers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "weekly")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            for overrides in ({"agent_id": "child"}, {"agent_id": None},
+                              {"session_id": None}, {"turn_id": ""}, {"turn_id": []}):
+                with self.subTest(overrides=overrides):
+                    self.assertEqual(handle_event({**payload, **overrides}, data_dir), ALLOW)
+
+    def test_pre_tool_never_detects_quota_without_post_tool_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = post_tool_payload(directory, primary_used_percent=100, weekly_used_percent=100)
+            payload["hook_event_name"] = "PreToolUse"
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            self.assertFalse(data_dir.exists())
+
+    def test_pre_tool_observes_latch_with_unreadable_transcript(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "weekly")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t",
+                       "transcript_path": str(Path(directory) / "missing.jsonl")}
+            self.assertEqual(handle_event(payload, data_dir).get("decision"), "block")
+
+    def test_pre_tool_missing_or_unavailable_storage_fails_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            self.assertFalse(data_dir.exists())
+            data_dir.write_text("not a directory")
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+
+    def test_pre_tool_unreadable_storage_fails_open(self):
+        if os.geteuid() == 0:
+            self.skipTest("Root can read directories with access removed")
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            claim_turn_latch(data_dir, "s", "t", RESET, "five-hour")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "turn_id": "t"}
+            data_dir.chmod(0)
+            try:
+                self.assertEqual(handle_event(payload, data_dir), ALLOW)
+            finally:
+                data_dir.chmod(0o700)
+
+    def test_post_tool_message_does_not_replace_result(self):
+        message = "Stop expanding work and prepare a handoff."
+        output = format_hook_output({"hook_event_name": "PostToolUse"}, {
+            "decision": "allow", "reason": message, "tool_stop": True,
+        })
+        self.assertEqual(output, {
+            "systemMessage": message,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse", "additionalContext": message,
+            },
+        })
+
+    def test_precompact_message_remains_nonblocking(self):
+        payload = {"hook_event_name": "PreCompact", "trigger": "auto"}
+        with tempfile.TemporaryDirectory() as directory:
+            decision = handle_event(payload, Path(directory))
+            self.assertEqual(format_hook_output(payload, decision), {
+                "systemMessage": decision["reason"],
+            })
+
+    def test_real_hook_process_preserves_post_tool_result_then_denies_same_turn(self):
+        """Catch a stale main formatter call or process-local latch storage."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = post_tool_payload(directory, primary_used_percent=97)
+            payload["tool_response"] = {"output": "completed tool evidence"}
+            data_dir = Path(directory) / "markers"
+
+            def run_hook(event_payload):
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "hooks/context_guard.py")],
+                    input=json.dumps(event_payload), text=True, capture_output=True,
+                    env={**os.environ, "PLUGIN_DATA": str(data_dir)}, check=True, timeout=10,
+                )
+                self.assertEqual(result.stderr, "")
+                return json.loads(result.stdout) if result.stdout else None
+
+            post_output = run_hook(payload)
+            self.assertEqual(set(post_output), {"systemMessage", "hookSpecificOutput"})
+            self.assertEqual(post_output["hookSpecificOutput"], {
+                "hookEventName": "PostToolUse", "additionalContext": post_output["systemMessage"],
+            })
+            pre_payload = {"hook_event_name": "PreToolUse", "session_id": "session", "turn_id": "turn"}
+            pre_output = run_hook(pre_payload)
+            self.assertEqual(pre_output["hookSpecificOutput"], {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": pre_output["systemMessage"],
+            })
+            self.assertIsNone(run_hook({**pre_payload, "turn_id": "new-turn"}))
+            self.assertIsNone(run_hook({**payload, "hook_event_name": "UserPromptSubmit"}))

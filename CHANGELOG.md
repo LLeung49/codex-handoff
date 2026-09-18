@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.0
+
+- Add the opt-in `$handoff-context-setup` workflow for durable project context;
+  V1 handoffs remain supported.
+- Preserve completed `PostToolUse` results at the strong threshold, then deny
+  later supported local tools in that same turn through `PreToolUse`.
+- Document the guard's best-effort limits, including hosted and special tool
+  paths that may bypass it, and the safe validation sequence.
+- Clarify that local opaque marker and latch files are not `.handoff/` documents.
+
 ## v0.1.1
 
 - Fix `UserPromptSubmit` output so ordinary allow decisions emit no invalid JSON.
