@@ -7,3 +7,6 @@
 
 # Local linked worktrees must never be committed as repository content.
 /.worktrees/
+
+# Project-local plans, specifications, and handoff context are not published.
+/docs/
