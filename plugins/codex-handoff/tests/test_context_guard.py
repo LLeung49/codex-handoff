@@ -5,11 +5,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from hooks.context_guard import (
+    ALLOW,
+    claim_turn_latch,
     format_hook_output,
     handle_event,
+    handle_post_tool_use,
     latest_primary_rate_limit,
     latest_secondary_rate_limit,
     quota_warning,
+    turn_latch_exists,
 )
 
 
@@ -298,6 +302,24 @@ class DecisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event({"session_id": "s"}, data_dir), {"decision": "allow"})
+
+    def test_router_keeps_v1_prompt_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=97)
+            self.assertEqual(handle_event(payload, Path(directory) / "markers")["decision"], "block")
+
+    def test_turn_latch_key_is_turn_specific(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker_dir = Path(directory) / "markers"
+            claim_turn_latch(marker_dir, "s", "turn-a", RESET, "five-hour")
+            self.assertTrue(turn_latch_exists(marker_dir, "s", "turn-a", RESET, "five-hour"))
+            self.assertFalse(turn_latch_exists(marker_dir, "s", "turn-b", RESET, "five-hour"))
+
+    def test_missing_turn_or_session_never_creates_a_latch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker_dir = Path(directory) / "markers"
+            self.assertEqual(handle_post_tool_use({"turn_id": "t"}, marker_dir), ALLOW)
+            self.assertFalse(marker_dir.exists())
 
 
 class HookOutputTests(unittest.TestCase):

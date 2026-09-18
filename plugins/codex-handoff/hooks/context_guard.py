@@ -106,26 +106,56 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
 ALLOW = {"decision": "allow"}
 
 
-def _marker_path(
-    data_dir: Path, session_id: str, resets_at: int | float, level: str, window: str
-) -> Path:
-    """Create a filesystem-safe name for the documented marker key."""
-    key = json.dumps([session_id, resets_at, level, window], separators=(",", ":"), ensure_ascii=True)
+def _marker_path(data_dir: Path, *key_parts: object) -> Path:
+    """Create a filesystem-safe name for a marker key."""
+    key = json.dumps(list(key_parts), separators=(",", ":"), ensure_ascii=True)
     return data_dir / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".marker")
 
 
-def _claim_marker(
-    data_dir: Path, session_id: str, resets_at: int | float, level: str, window: str
-) -> bool:
-    """Atomically claim a warning key, failing open if storage is unavailable."""
+def _claim_marker(data_dir: Path, *key_parts: object) -> bool:
+    """Atomically claim a marker key, failing open if storage is unavailable."""
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        marker = _marker_path(data_dir, session_id, resets_at, level, window)
+        marker = _marker_path(data_dir, *key_parts)
         descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)
         return True
     except (OSError, TypeError, ValueError):
         return False
+
+
+def _marker_exists(data_dir: Path, *key_parts: object) -> bool:
+    """Test a marker key, failing open if storage is unavailable."""
+    try:
+        return _marker_path(data_dir, *key_parts).is_file()
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def claim_turn_latch(
+    data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
+) -> bool:
+    """Atomically claim the documented same-turn tool-stop latch."""
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    if not isinstance(turn_id, str) or not turn_id:
+        return False
+    if _number(resets_at) is None or not isinstance(window, str) or not window:
+        return False
+    return _claim_marker(data_dir, session_id, turn_id, resets_at, "tool-stop", window)
+
+
+def turn_latch_exists(
+    data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
+) -> bool:
+    """Return whether the documented same-turn tool-stop latch exists."""
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    if not isinstance(turn_id, str) or not turn_id:
+        return False
+    if _number(resets_at) is None or not isinstance(window, str) or not window:
+        return False
+    return _marker_exists(data_dir, session_id, turn_id, resets_at, "tool-stop", window)
 
 
 def _soft_reason() -> str:
@@ -143,23 +173,13 @@ def _weekly_strong_reason() -> str:
     return "Weekly quota is nearly exhausted. Run $handoff-prepare before continuing in a fresh session."
 
 
-def handle_event(payload: dict, data_dir: Path) -> dict:
-    """Return a Codex hook decision for prompt and compaction events.
-
-    Telemetry and marker failures deliberately return allow.  ``data_dir`` is
-    explicit for testability; the command entrypoint obtains its default from
-    ``PLUGIN_DATA`` when Codex invokes the hook.
-    """
+def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
+    """Return the V1 quota decision for a user-prompt event."""
     try:
         if not isinstance(payload, dict):
             return ALLOW
         if "agent_id" in payload:
             return ALLOW
-        if payload.get("trigger") == "auto":
-            return {"decision": "allow", "reason": _strong_reason()}
-        if "trigger" in payload:
-            return ALLOW
-
         session_id = payload.get("session_id")
         transcript_path = payload.get("transcript_path")
         if not isinstance(session_id, str) or not session_id or not isinstance(transcript_path, str):
@@ -191,6 +211,55 @@ def handle_event(payload: dict, data_dir: Path) -> dict:
             ):
                 return {"decision": "allow", "reason": _soft_reason()}
         return ALLOW
+    except Exception:
+        return ALLOW
+
+
+def handle_precompact(payload: dict, data_dir: Path) -> dict:
+    """Return the V1 non-blocking warning for automatic compaction."""
+    try:
+        if not isinstance(payload, dict) or payload.get("trigger") != "auto":
+            return ALLOW
+        return {"decision": "allow", "reason": _strong_reason()}
+    except Exception:
+        return ALLOW
+
+
+def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
+    """Placeholder event handler; tool-loop detection is added in V2 Task 2."""
+    try:
+        if not isinstance(payload, dict):
+            return ALLOW
+        if "agent_id" in payload:
+            return ALLOW
+        if not isinstance(payload.get("session_id"), str) or not payload.get("session_id"):
+            return ALLOW
+        if not isinstance(payload.get("turn_id"), str) or not payload.get("turn_id"):
+            return ALLOW
+        return ALLOW
+    except Exception:
+        return ALLOW
+
+
+def handle_event(payload: dict, data_dir: Path) -> dict:
+    """Route a hook payload while retaining the direct V1 payload contract."""
+    try:
+        if not isinstance(payload, dict):
+            return ALLOW
+        event_name = payload.get("hook_event_name")
+        if event_name == "PreCompact":
+            return handle_precompact(payload, data_dir)
+        if event_name == "PostToolUse":
+            return handle_post_tool_use(payload, data_dir)
+        if event_name == "UserPromptSubmit":
+            return handle_user_prompt(payload, data_dir)
+        if event_name:
+            return ALLOW
+        if payload.get("trigger") == "auto":
+            return handle_precompact(payload, data_dir)
+        if "trigger" in payload:
+            return ALLOW
+        return handle_user_prompt(payload, data_dir)
     except Exception:
         return ALLOW
 
