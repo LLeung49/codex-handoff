@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Start the five-hour soft handoff nudge at 15% remaining rather than 25%; its
+  one-time protective block remains at 3% remaining or below.
+
 ## v0.2.0
 
 - Add the opt-in `$handoff-context-setup` workflow for durable project context;

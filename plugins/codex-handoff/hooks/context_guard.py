@@ -96,7 +96,7 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
     if used is None or not 0 <= used <= 100:
         return None
     remaining = 100 - used
-    if remaining > 25 or (not soft_warning and remaining > 3):
+    if remaining > 15 or (not soft_warning and remaining > 3):
         return None
     if remaining > 3:
         return "soft"

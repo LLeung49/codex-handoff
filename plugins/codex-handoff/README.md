@@ -10,7 +10,7 @@ selected by the repository Marketplace.
 long-running session before automatic context compaction or a low Coding Plan
 quota makes a useful handoff less likely.
 
-For the five-hour quota, it gives one soft nudge between 25% and 3% remaining,
+For the five-hour quota, it gives one soft nudge from 15% down to above 3% remaining,
 then applies one protective block at 3% remaining or below. This leaves room
 to use nearly the whole window while preserving a final turn for handoff.
 
@@ -98,7 +98,7 @@ ROLLOUT="$SMOKE_DIR/rollout.jsonl"
 MARKERS="$SMOKE_DIR/markers"
 RESET_AT=$(( $(date +%s) + 18000 ))
 
-printf '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":75,"resets_at":%s}}}}\n' "$RESET_AT" \
+printf '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"window_minutes":300,"used_percent":85,"resets_at":%s}}}}\n' "$RESET_AT" \
   > "$ROLLOUT"
 printf '{"session_id":"soft","transcript_path":"%s"}\n' "$ROLLOUT" \
   | PLUGIN_DATA="$MARKERS" "$VALIDATOR_PYTHON" ./hooks/context_guard.py

@@ -1,18 +1,77 @@
 # codex-handoff
 
-> 在长任务的上下文或额度到达边界前，保留已核实的状态，再有意识地继续工作。
+> 让一个即将到达额度边界的长任务，带着已核实的状态继续，而不是让下一位 agent 从零猜起。
 
-`codex-handoff` 是一个 Codex 插件，适合任务仍然重要、但当前上下文或 Coding Plan 额度已不适合继续承载工作的时候。它把交接内容整理成小而可审阅的包；是否新开任务、何时继续、由谁继续，始终由**你**决定。它不会自动切换会话。
+`codex-handoff` 是给 Codex 用的交接插件。它不替你继续开发，也不会自动创建或切换会话；它只在恰当的时候提醒、暂停后续消耗，并帮你把已完成的工作交给下一位 agent。
 
-如果额度足够覆盖你的工作，大多数人不需要这个工具。它解决的是：一个长期任务尚未完成，五小时窗口却已经接近耗尽；只复制聊天记录或把 spec 交给新的 agent，传递的是原始材料，而不是有边界的共同状态。新的 agent 可能偏离目标、重复工作、遗漏重点，并在重建上下文时继续消耗额度；即使等待下一个窗口，也可能再次付出同样的上下文成本。
+## 适合什么情况？
+
+如果你的额度一直足够完成任务，**不需要安装它**。
+
+它适合这样的情况：一个大任务还没做完，五小时额度快用尽了。直接把聊天记录、spec 或几个文件交给新的 agent，往往会让对方重新摸索、遗漏重点或擅自扩展工作；等到下一个额度窗口，也可能继续为同一批上下文付费。
+
+`codex-handoff` 的目标是把“交接”变成一个有边界的动作：保留目标、证据、进度、决定和下一步，而不是把一整段聊天记录塞给下一个 agent。
 
 <p align="center">
   <img src="assets/codex-handoff-00-origin-story.png" alt="额度充足时一个小黑完成大任务；额度有限时多个小黑先封装标准交接单，再由下一位继续" width="100%">
 </p>
 
-## 🚀 安装
+## 一次开发如何被保护？
 
-将这个公开仓库注册为 Codex marketplace，再安装插件；不需要 clone 仓库：
+下面是一段典型的长任务经历。
+
+### 1. 任务正常推进
+
+额度高于 15% 时，插件保持安静。你和 Codex 像平时一样工作，不会被提醒或打断。
+
+### 2. 剩余 15% 到高于 3%：只提醒，不停工
+
+插件只提醒一次：现在适合准备交接。你可以忽略它并继续工作；它不会暂停 agent、不会撤销任何改动，也不会自动生成 handoff。
+
+### 3. 剩余 3% 或以下：保留成果，再阻止继续燃烧
+
+此时会出现两种情况：
+
+- **你刚提交一条新请求**：这次请求会先被阻止，agent 不会开始新一轮推理或执行。你可以先运行 `$handoff-prepare`，而不是让最后一点额度消失在新的工作里。
+- **agent 正在调用本地工具**：已完成的工具结果会被保留；不会撤销该工具已经做过的事，也不会丢掉它的输出。随后同一轮中下一次受支持的本地工具调用会被拒绝，避免它继续无止境地消耗额度。
+
+这不是“清空上下文”或“丢失工作”。它只是停止**后续**动作；已经得到的工具结果、已写入的文件和当前对话都还在。
+
+<p align="center">
+  <img src="assets/codex-handoff-04-protective-block.png" alt="额度低于 3% 时，插件阻止新的后续操作" width="100%">
+</p>
+
+### 4. 由你决定交接与继续
+
+当你准备好时，运行 `$handoff-prepare`。它会在项目的 `.handoff/` 中写入一份 Markdown 交接单，记录当前任务真正需要带走的内容。然后在一个新任务里运行 `$handoff-continue`：新的 agent 会先读交接单、说明它理解了什么，然后停下来等你授权下一步。
+
+<p align="center">
+  <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
+</p>
+
+<p align="center">
+  <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
+</p>
+
+## 会带来什么影响？
+
+你应该预期这些行为和限制：
+
+- **不会自动切换会话**：不会帮你新建 agent、提交代码、推送仓库或开始下一步；所有继续动作都需要你决定。
+- **低额度时可能被打断一次**：五小时或周额度到 3% 时，插件会为当前会话和本次额度窗口做一次保护性阻断。阻断的目的是留住交接机会，而不是取消已完成工作。
+- **不会撤销已完成操作**：已经完成的工具结果、已经写入的文件和对话上下文仍然存在。它只会拒绝同一轮的后续受支持工具调用。
+- **不是百分之百的总开关**：额度保护只是**尽力而为**。托管或特殊工具路径可能绕过本地保护；如果读取额度信息失败，插件会放行，而不是误伤正常工作。
+- **自动压缩仍可发生**：自动压缩前会给出强提醒，但不会强行阻止压缩。需要交接时，请主动运行 `$handoff-prepare`。
+
+<p align="center">
+  <img src="assets/codex-handoff-03-quota-guard.png" alt="小黑保存已完成结果，并在额度低时停止后续工具调用" width="100%">
+</p>
+
+## 三步开始使用
+
+### 1. 安装
+
+将公开仓库注册为 Codex marketplace，再安装插件；不需要 clone：
 
 ```bash
 codex plugin marketplace add LLeung49/codex-handoff --ref main
@@ -20,9 +79,11 @@ codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
 
-确认列表显示 `codex-handoff@codex-handoff` 已安装并启用，然后新开一个 **Codex 任务**。新任务才是加载新 hook 与 skill 的可靠边界。
+确认 `codex-handoff@codex-handoff` 已安装并启用后，新开一个 **Codex 任务**，让它加载新的 hook 和 skill。
 
-升级或重新安装已有副本：
+#### 已经安装过旧版本？
+
+重新安装即可更新插件：
 
 ```bash
 codex plugin remove codex-handoff@codex-handoff
@@ -30,119 +91,40 @@ codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
 
-通常应保留 marketplace 注册。只有确定不再需要时，才在移除插件后执行：
+如果确定不再使用它，移除插件后还可以注销 marketplace：
 
 ```bash
 codex plugin marketplace remove codex-handoff
 ```
 
-## 为什么需要 codex-handoff？
+### 2. 正常开发，看到提醒再决定
 
-| 问题 | 插件保护什么 | 仍由你决定什么 |
-| --- | --- | --- |
-| 长任务超过额度或上下文窗口 | 新任务开始前可捕获已核实的任务状态 | 是否、何时、在哪里继续 |
-| 新 agent 缺少原始范围与决策 | handoff 关联目标、证据、相关产物与边界 | 下一步被授权的动作 |
-| 额度紧张后工具循环持续扩张 | 已完成的工具结果会被保留；同一轮后续受支持的本地工具可以被停止 | 是否运行 `$handoff-prepare` |
-| 新窗口原本要重新重建上下文 | 小而可审阅的快照替代无边界地重放完整聊天记录 | 是否运行 `$handoff-prepare` |
+不需要为了插件改变平时的工作方式。额度高于 15% 时它保持安静；剩余从 15% 降到高于 3% 时，收到一次提醒后，你自己决定是否立即交接。
 
-这个插件的范围刻意很窄：没有 daemon、没有 supervisor、不会自动新建任务，也不会自动切换会话。
+### 3. 需要换人时，做一次明确交接
 
-<p align="center">
-  <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
-</p>
+在当前任务运行 `$handoff-prepare`，检查 `.handoff/` 里生成的交接单；再在新任务运行 `$handoff-continue`。后者不会直接开始干活，只有你明确授权后才继续。
 
-它传递的是已经核实的任务状态，而不是要求一个新的 agent 从零开始重建任务。
+## 三个技能分别做什么？
 
-## 工作方式
+- `$handoff-prepare`：把当前任务的目标、范围、已完成工作、证据、未决事项和下一步写成一份不可变交接单。
+- `$handoff-continue`：让新 agent 对齐这份交接单；它会先汇报理解结果，再等待你的授权。
+- `$handoff-context-setup`：可选。它先只读检查项目，再提议创建本地的长期上下文与进度文件；只有你批准后才会写入。
 
-```text
-正常任务工作
-      │
-      ├─ UserPromptSubmit：在强阈值触发一次保护性 prompt 阻断
-      ├─ PostToolUse：保留已完成的本地工具结果，并设置同轮 latch
-      └─ PreCompact(auto)：给出强 handoff 警告
-      │
-      ▼
-$handoff-prepare
-      │  写入一份与厂商无关、位于项目内的 Markdown 快照
-      ▼
-新的 Codex 任务
-      │
-      ▼
-$handoff-continue
-      │  对齐上下文、范围、证据与开放决策，然后停止
-      ▼
-你授权下一项有范围的动作
-```
+## 想了解实现细节？
 
-上面的“带着上下文继续”图表达的正是这一点：跨过边界时带走已核实的工作，而不是把新任务当作一张白纸。
+<details>
+<summary>展开查看 hook、额度与本地文件的实现边界</summary>
 
-<p align="center">
-  <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
-</p>
+五小时额度在剩余 15% 到高于 3% 时产生一次软提醒；≤3% 时产生一次保护性阻断。周额度没有软提醒，≤3% 时也会独立阻断一次。`UserPromptSubmit` 在新请求开始前检查额度；`PostToolUse` 只在一个本地工具完成后记录交接提示；`PreToolUse` 只会在同一轮已触发保护后拒绝下一次受支持的本地工具调用；`PreCompact(auto)` 只提醒，不阻断。
 
-## 技能
+插件不会上传 telemetry。它只读取有限长度的本地 rollout 记录；读取失败或格式异常时 fail-open。去重和同轮保护使用的文件只存放本地状态，不保存 handoff 正文；真正的交接内容始终在项目 `.handoff/` 中。
 
-### 1. `$handoff-context-setup`
-
-当项目需要长期、可复用的上下文时使用一次。它先进行只读发现，并提出下列本地文件的具体来源与内容建议：
-
-- `docs/agent-context.md`：来源层级、约束、当前范围与阅读顺序
-- `docs/project-status.md`：已交付内容、进行中事项、阻塞项与等待决策
-
-它必须等到你明确批准后，才会创建或大幅重写这两个文件。`docs/` 是本地工作材料，不会随此开源仓库发布。
-
-### 2. `$handoff-prepare`
-
-当你决定保留当前任务时使用。它会写入一份不可变的 `.handoff/<UTC timestamp>-<slug>.md` 快照，记录原始目标、范围约定、所需上下文、当前状态、决策理由、证据、问题分流、Git 状态与继续工作的约定。handoff 记录事实；它不授权未来工作。
-
-### 3. `$handoff-continue`
-
-在新任务中使用。它读取仓库指令、可选的上下文索引、指定 handoff 以及 handoff 列出的任务产物，然后给出上下文对齐报告并停止。没有你的明确指示，它不会运行命令、编辑文件、测试、提交、推送或执行建议的下一步。
-
-## 额度保护
-
-| 信号 | 行为 |
-| --- | --- |
-| 五小时额度：剩余 25% 至高于 3% | 一次 `$handoff-prepare` 软提醒 |
-| 五小时额度：剩余 3% 或以下 | 每个会话与重置窗口各一次保护性 prompt 阻断 |
-| 周额度：剩余 3% 或以下 | 每个会话与重置窗口各一次独立的保护性 prompt 阻断 |
-| 某个受支持的本地工具观察到任一强阈值 | 保留该结果，提供 handoff 上下文，并锁存这一轮 |
-| 同一已锁存轮中的后续受支持本地工具 | `PreToolUse` 可在执行前拒绝它 |
-| 自动压缩 | 强但不阻断的提醒 |
-
-<p align="center">
-  <img src="assets/codex-handoff-04-protective-block.png" alt="观测到quota不足3%，停止后续工具调用" width="100%">
-</p>
-
-
-额度保护只是**尽力而为**：它无法观察每一个模型动作，托管或特殊工具路径可能绕过本地 hook。不要为了测试而耗尽额度。当日常工作自然到达 3% 或以下时，可以请求两个无害的本地命令：要么 prompt guard 在工作开始前阻断，要么第一个已完成的工具结果会被保留，第二个受支持的本地工具会被拒绝。
-
-插件数据标记是本地、零内容的去重/latch 文件；它们不是项目的 `.handoff/` 文档，也不保存 handoff 内容。
-
-<p align="center">
-  <img src="assets/codex-handoff-03-quota-guard.png" alt="小黑保存已完成结果，并在额度低时停止后续工具调用" width="100%">
-</p>
-
-## 第一次检查
-
-在新开的 Codex 任务中发送：
-
-```text
-只使用 $handoff-context-setup 检查这个仓库，并提出上下文文档来源建议。不要创建或修改文件。提出建议后停止。
-```
-
-预期结果只是建议，不会写入长期文件。如果 Codex 请求信任插件 hook，请确认它只有：
-
-```text
-python3 "$PLUGIN_ROOT/hooks/context_guard.py"
-```
-
-这个 hook 只读取有边界的本地 rollout telemetry 尾部；在数据无法读取或格式错误时会 fail-open。它不会上传 telemetry、编辑项目文件、调用 handoff skill 或切换会话。
+</details>
 
 ## 本地开发
 
-只有在你希望修改或验证插件时才需要 clone：
+只有希望修改或验证插件时才需要 clone：
 
 ```bash
 git clone https://github.com/LLeung49/codex-handoff.git

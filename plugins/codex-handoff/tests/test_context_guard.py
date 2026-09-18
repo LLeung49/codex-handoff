@@ -140,9 +140,9 @@ class TelemetryTests(unittest.TestCase):
                 self.assertIsNone(latest_primary_rate_limit(rollout))
 
     def test_quota_warning_boundaries(self):
-        self.assertIsNone(quota_warning(rate_limit(74.9)))
-        self.assertEqual(quota_warning(rate_limit(75)), "soft")
+        self.assertIsNone(quota_warning(rate_limit(84.9)))
         self.assertEqual(quota_warning(rate_limit(85)), "soft")
+        self.assertEqual(quota_warning(rate_limit(90)), "soft")
         self.assertEqual(quota_warning(rate_limit(96)), "soft")
         self.assertEqual(quota_warning(rate_limit(97)), "strong")
 
@@ -205,8 +205,8 @@ class PluginMetadataTests(unittest.TestCase):
             if (candidate / ".agents/plugins/marketplace.json").exists()
         )
         readme = (marketplace_root / "README.md").read_text()
-        for heading in ("## 🚀 安装", "## 为什么需要 codex-handoff？", "## 工作方式",
-                        "## 技能", "## 额度保护"):
+        for heading in ("## 适合什么情况？", "## 一次开发如何被保护？",
+                        "## 会带来什么影响？", "## 三步开始使用"):
             with self.subTest(heading=heading):
                 self.assertIn(heading, readme)
         self.assertIn("assets/codex-handoff-01-carry-forward.png", readme)
@@ -459,7 +459,7 @@ class DecisionTests(unittest.TestCase):
     def test_soft_warning_allows_with_one_handoff_nudge(self):
         """Removing soft-level deduplication would repeat the nudge."""
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload(directory, used_percent=75, session_id="s")
+            payload = prompt_payload(directory, used_percent=85, session_id="s")
             data_dir = Path(directory) / "markers"
             first = handle_event(payload, data_dir)
             self.assertEqual(first["decision"], "allow")
