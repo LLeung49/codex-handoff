@@ -177,9 +177,74 @@ against repeated "one more bug" loops.
 
 ## Hook Behavior and Compatibility
 
-V2 does not change the quota policy validated in V1. The five-hour soft nudge,
-five-hour protective block, weekly protective block, marker keys, fail-open
-parsing, subagent bypass, and `PreCompact(auto)` warning remain unchanged.
+V2 preserves V1's quota thresholds and adds an event-driven tool-loop
+protection layer. It does not introduce a daemon, a polling process, or an
+automatic session switch.
+
+### Lifecycle coverage
+
+The quota guard uses four complementary lifecycle points:
+
+| Hook | Role | Why it is retained or added |
+| --- | --- | --- |
+| `UserPromptSubmit` | Pre-turn protection | Blocks one new user prompt when the latest known snapshot is already at the strong threshold. |
+| `PostToolUse` | Detection during an active tool loop | Checks the newest snapshot after each supported local tool completes, preserves that tool's result, and sets a turn-local stop latch when the strong threshold is reached. |
+| `PreToolUse` | Enforcement during an active tool loop | Denies later supported local tool calls in a latched turn before they run. |
+| `PreCompact(auto)` | Context-boundary warning | Retains V1's strong, non-blocking warning before automatic compaction. |
+
+`PermissionRequest` is not used for quota enforcement because it fires only
+for tools that request approval and therefore misses normal permitted tools.
+`Stop` is not used because its blocking decision asks Codex to continue the
+turn, which is the opposite of a quota stop. `SessionStart`, `SessionEnd`,
+`PostCompact`, `Interrupt`, and subagent lifecycle hooks do not provide the
+right in-turn tool boundary. V2 continues to bypass subagents.
+
+### Tool-loop stop protocol
+
+`PostToolUse` and `PreToolUse` are synchronous and match every supported local
+tool path. The hook still parses only the bounded rollout tail and fails open
+on missing or malformed telemetry.
+
+1. A supported local tool completes normally.
+2. `PostToolUse` reads the newest valid quota snapshot.
+3. If no strong quota condition exists, it returns no output and preserves the
+   normal tool result.
+4. If a five-hour or weekly window is at 3% remaining or below, it creates a
+   short-lived turn-stop latch and returns only a `systemMessage` plus compact
+   model-visible context: stop expanding work, retain the completed result,
+   summarize state, and ask the user to run `$handoff-prepare`.
+5. It must **not** return `continue: false` or `decision: block` from
+   `PostToolUse`; either behavior replaces the original tool result and would
+   discard useful task context.
+6. If the model attempts a further supported local tool call in the same turn,
+   `PreToolUse` detects the latch and returns the documented
+   `permissionDecision: deny` response. The pending tool does not execute.
+7. The model can still produce a final text response containing the completed
+   tool result and handoff guidance. The user then decides whether to invoke
+   `handoff-prepare` in a fresh user turn.
+
+The latch logical key is:
+
+```text
+(session_id, turn_id, resets_at, "tool-stop", quota_window)
+```
+
+It applies only to the turn that discovered the low quota. A later user turn
+has a different `turn_id`, so an explicit `$handoff-prepare` request is not
+blocked by an old latch. The normal strong-warning marker remains keyed by
+session, reset time, warning level, and window; the implementation must record
+that the tool-loop intervention has already delivered the strong warning so a
+later prompt is not needlessly blocked before the user can prepare a handoff.
+
+This is a guardrail, not a hard quota interrupt. Hosted tools and specialized
+tool paths can bypass local tool hooks, and no hook runs before every model
+request. The plugin therefore cannot promise to preserve every remaining
+token, but it can prevent the common sequence of additional local reads,
+edits, commands, and tests after the threshold is observed.
+
+The five-hour soft nudge, five-hour protective block, weekly protective block,
+marker keys, fail-open parsing, and `PreCompact(auto)` warning otherwise
+remain unchanged.
 
 Hook copy may name `$handoff-prepare`; it must not automatically run any
 skill, create the durable documents, or create a session. Existing V1 handoff
@@ -210,10 +275,18 @@ reports them as absent rather than inventing context.
    fixed without a fresh user authorization.
 5. Existing V1 handoffs still produce a safe briefing with missing V2 sections
    explicitly identified.
-6. Existing quota guard tests and live hook behavior remain unchanged.
-7. Skill validation and plugin validation pass; manual tests cover setup
+6. A strong snapshot observed after a supported tool preserves that completed
+   tool result, creates a turn-stop latch, and gives the model handoff context.
+7. A later supported tool attempt in the same turn is denied before it runs.
+8. A new user turn can explicitly run `handoff-prepare`; an old turn-stop latch
+   does not deny that tool work.
+9. Hosted-tool and stale-telemetry limitations are documented and fail open.
+10. Existing quota guard tests and live hook behavior remain unchanged outside
+   the newly covered tool-loop path.
+11. Skill validation and plugin validation pass; manual tests cover setup
    refusal without approval, status refresh with approval, V1 compatibility,
-   and the scope-escalation gate.
+   the scope-escalation gate, result preservation, same-turn tool denial, and
+   the next-turn handoff path.
 
 ## Migration
 
