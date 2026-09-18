@@ -74,6 +74,7 @@ VALIDATOR_PYTHON="$PWD/work/validator-venv/bin/python"
 SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
 "$VALIDATOR_PYTHON" -m unittest discover -s tests -v
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/plugin-creator/scripts/validate_plugin.py" .
+"$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-context-setup
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-prepare
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-continue
 ```
@@ -81,7 +82,7 @@ SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
 The PyYAML installation requires access to your configured Python package
 index on first setup. If your Codex runtime or system skills live elsewhere,
 adjust `BUNDLED_PYTHON` or `SYSTEM_SKILLS` to their installed locations. A local
-Python 3.10+ can also create the environment. All four validation commands
+Python 3.10+ can also create the environment. All five validation commands
 must exit successfully; the validators print `Plugin validation passed` and
 `Skill is valid!` for each skill.
 

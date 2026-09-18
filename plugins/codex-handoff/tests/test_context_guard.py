@@ -198,6 +198,11 @@ class PluginMetadataTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
 
+    def test_plugin_readme_validates_all_v2_skills(self):
+        """A released V2 plugin must validate the newly added setup skill."""
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("skills/handoff-context-setup", readme)
+
     def test_marketplace_points_to_the_nested_plugin(self):
         marketplace_root = next(
             (candidate for candidate in (ROOT, *ROOT.parents)
