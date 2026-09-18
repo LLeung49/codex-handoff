@@ -183,6 +183,21 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertIn("codex plugin add codex-handoff@codex-handoff", readme)
         self.assertNotIn("/Users/lucienleung", readme)
 
+    def test_root_readme_documents_v2_skills_and_guard_limits(self):
+        """Removing V2 safety guidance would leave marketplace users misinformed."""
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = " ".join((marketplace_root / "README.md").read_text().split())
+        for requirement in (
+            "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
+            "PostToolUse", "PreToolUse", "best effort", "never switches sessions automatically",
+            "completed tool result is preserved", "hosted or special tool paths",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, readme)
+
     def test_marketplace_points_to_the_nested_plugin(self):
         marketplace_root = next(
             (candidate for candidate in (ROOT, *ROOT.parents)
@@ -202,9 +217,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_1_1_release_version(self):
+    def test_plugin_manifest_uses_the_v0_2_0_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertTrue(manifest["version"].startswith("0.1.1+codex."))
+        self.assertTrue(manifest["version"].startswith("0.2.0+codex."))
 
 
 class HookConfigurationTests(unittest.TestCase):

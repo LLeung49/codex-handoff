@@ -23,11 +23,35 @@ It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.
 
+## V2 durable context and migration
+
+V1 handoffs still work unchanged. V2 durable context documents are opt-in:
+run `$handoff-context-setup` when you want a read-only proposal and, after
+explicit approval, durable project context. It does not create those documents
+as a handoff side effect. Use `$handoff-prepare` for one immutable handoff
+snapshot and `$handoff-continue` in a fresh task for its briefing.
+
+The plugin's data markers are opaque, local, zero-content dedupe/latch files.
+They are not project `.handoff/` documents and contain no handoff content.
+
+## V2 quota guard limits
+
+At the strong threshold, `PostToolUse` keeps a completed tool result available
+and records a same-turn latch. A subsequent supported local tool can be denied
+by `PreToolUse` with a handoff message. This guard is best effort: it cannot
+observe every model action, and hosted or special tool paths may bypass it.
+Invoke `$handoff-prepare` deliberately when you need a handoff; the guard does
+not switch sessions automatically.
+
+For safe live validation, run synthetic hook tests first. Then, only when
+normal work naturally reaches the threshold, observe one harmless supported
+local tool; do not consume quota just to force the case.
+
 ## Deliberate new-session workflow
 
-When prompted, run `handoff-prepare` to write a handoff document, review it,
+When prompted, run `$handoff-prepare` to write a handoff document, review it,
 and choose when and where to start a fresh Codex session. In that new session,
-run `handoff-continue` to read the handoff and receive a briefing. A handoff is
+run `$handoff-continue` to read the handoff and receive a briefing. A handoff is
 context, not authorization: it does not authorize edits, commands, or its
 listed next step without your explicit direction.
 

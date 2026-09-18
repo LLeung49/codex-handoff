@@ -5,7 +5,7 @@ automatic context compaction or a nearly exhausted Coding Plan quota makes
 continued work less useful.
 
 It writes vendor-neutral Markdown handoffs. You decide whether and where to
-start a fresh session; it never starts or switches sessions automatically.
+start a fresh session; it never switches sessions automatically.
 
 ## Install from GitHub
 
@@ -73,27 +73,46 @@ A successful first check means Codex recognizes `handoff-continue` and answers
 that a handoff document alone does not authorize commands or edits. When more
 than 25% of the five-hour quota remains, the guard intentionally stays silent.
 
-## Expected quota behavior
+## V2 skills and migration
+
+V1 handoffs continue to work. V2 adds optional durable project context: use
+`$handoff-context-setup` only when you want to propose and, after explicit
+approval, create durable context documents. It does not create them as a
+side effect of a handoff. Use `$handoff-prepare` to make one immutable handoff
+snapshot, and `$handoff-continue` in a new task to receive a briefing from it.
+
+The plugin's local data markers are opaque, local, zero-content dedupe and
+latch files. They are not project `.handoff/` documents and do not contain
+your handoff content.
+
+## Expected quota behavior and limits
 
 - From 25% down to more than 3% remaining, it gives one soft handoff nudge.
-- At 3% remaining or below, it blocks one prompt per session and quota reset
-  window so you can preserve a final turn for handoff.
-- At 3% remaining or below for the weekly quota, it also blocks one prompt per
-  session and weekly reset window. The weekly quota has no soft-warning tier.
+- At 3% remaining or below, `PostToolUse` preserves the completed tool result
+  and sets a same-turn handoff latch. `PreToolUse` can then deny a later
+  supported local tool in that turn with a handoff message.
+- The same result-preserving behavior applies when the weekly quota reaches
+  3% or below. The weekly quota has no soft-warning tier.
 - `PreCompact(auto)` gives a strong warning before automatic compaction, but
   does not block compaction.
 
-These outcomes depend on live account telemetry and should be observed during
-normal work, not forced in an active account. If both windows are at the 3%
-threshold, the plugin returns one block that names both conditions.
+The guard is best effort: it cannot observe every model action, and hosted or
+special tool paths may bypass it. Invoke `$handoff-prepare` deliberately when
+you need a handoff; do not rely on the guard to start one or to switch tasks.
+
+For safe live validation, run the synthetic hook tests first. Then, only if
+normal work naturally reaches the 3% threshold, observe one harmless supported
+local tool: its completed tool result is preserved and a later supported local
+tool in that turn is denied. Do not exhaust quota just to force this check.
 
 ## Use the handoff skills
 
-When prompted or when you choose to switch tasks, run `handoff-prepare` to
+When prompted or when you choose to switch tasks, run `$handoff-prepare` to
 write and review a handoff in `.handoff/`. In the fresh task, run
-`handoff-continue` to read that document and receive a briefing. A handoff is
+`$handoff-continue` to read that document and receive a briefing. A handoff is
 context, not authorization: you must explicitly authorize any edits, commands,
-or next steps.
+or next steps. Durable V2 documents remain opt-in through
+`$handoff-context-setup`.
 
 ## Develop or update the plugin
 
