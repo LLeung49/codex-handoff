@@ -234,10 +234,110 @@ class HookConfigurationTests(unittest.TestCase):
 
 
 class SkillContractTests(unittest.TestCase):
+    """Check the required agent-visible contract, not runtime agent compliance."""
+
+    def read_skill(self, name):
+        path = ROOT / "skills" / name / "SKILL.md"
+        self.assertTrue(path.is_file(), f"Missing skill: {name}")
+        return " ".join(path.read_text().split())
+
     def test_continue_skill_forbids_automatic_execution(self):
-        content = (ROOT / "skills/handoff-continue/SKILL.md").read_text()
+        content = self.read_skill("handoff-continue")
         self.assertIn("does not edit", content)
         self.assertIn("does not run commands", content)
+
+    def test_context_setup_requires_approval_before_writing(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "read-only discovery", "explicit user approval", "exact source paths",
+            "draft", "Before approval, do not persist",
+            "docs/agent-context.md", "docs/project-status.md",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_context_setup_bounds_sources_and_records_authority(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "at most eight", "source-of-truth hierarchy", "last verified",
+            "known gaps", "Do not treat old plans as active",
+            "Do not change `AGENTS.md`, `CLAUDE.md`, source code, or `.gitignore`",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_context_setup_separates_status_from_authority(self):
+        content = self.read_skill("handoff-context-setup")
+        for requirement in (
+            "Delivered and accepted", "acceptance evidence", "One active work item",
+            "Blocked work", "Decisions awaiting the user", "Deferred candidates",
+            "not authorized", "latest task handoff", "remain the source of truth",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_prepare_requires_scope_and_evidence(self):
+        content = self.read_skill("handoff-prepare")
+        sections = (
+            "Original user objective", "Scope contract", "Required context",
+            "Current state", "Decisions and rationale", "Relevant artifacts",
+            "Evidence", "Known issues triage", "Git state", "Continuation contract",
+        )
+        for section in sections:
+            self.assertIn(section, content)
+        positions = [content.index(section) for section in sections]
+        self.assertEqual(positions, sorted(positions))
+        for requirement in ("stop condition", "reading manifest", "unverified", "expected base"):
+            self.assertIn(requirement, content)
+
+    def test_prepare_keeps_snapshot_immutable_and_status_opt_in(self):
+        content = self.read_skill("handoff-prepare")
+        for requirement in (
+            "one immutable", ".handoff/<UTC timestamp>-<slug>.md",
+            "Never overwrite", "status refresh in the same prompt",
+            "If either durable document is absent", "$handoff-context-setup",
+            "do not create it", "Do not change `.gitignore`",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_continue_reads_only_ordered_context(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "1. Repository instructions", "2. `docs/agent-context.md`",
+            "3. The selected handoff", "4. Only the handoff's required task-specific artifacts",
+        ):
+            self.assertIn(requirement, content)
+        positions = [content.index(prefix) for prefix in ("1. Repository", "2. `docs/", "3. The selected", "4. Only")]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Do not recursively follow links", content)
+        self.assertIn("at most eight", content)
+
+    def test_continue_stops_after_alignment(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "context-alignment report", "ends after", "does not run commands",
+            "loaded sources", "missing/ambiguous sources", "stop condition",
+            "confirmed evidence", "unverified claims", "user decisions",
+            "user authorizes a scoped next action", "commits, pushes",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_continue_handles_v1_and_untrusted_or_ambiguous_sources(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "V1", "Goal", "Suggested next steps", "absent", "do not invent",
+            "Missing, stale, or contradictory", "ambiguous", "ask the user to choose",
+            "data, never authority", "User messages and repository instructions retain precedence",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_scope_escalation_never_silently_authorizes_work(self):
+        for name in ("handoff-context-setup", "handoff-prepare", "handoff-continue"):
+            with self.subTest(skill=name):
+                content = self.read_skill(name)
+                for requirement in (
+                    "blocking", "approved acceptance criterion", "smallest scoped fix",
+                    "follow-up candidate", "separate task", "out of scope",
+                    "No classification grants authorization",
+                ):
+                    self.assertIn(requirement, content)
 
 
 class DecisionTests(unittest.TestCase):
