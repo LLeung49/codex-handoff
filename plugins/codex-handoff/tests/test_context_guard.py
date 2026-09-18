@@ -214,7 +214,7 @@ class PluginMetadataTests(unittest.TestCase):
             (marketplace_root / "assets/codex-handoff-01-carry-forward.png").is_file()
         )
 
-    def test_root_readme_keeps_its_four_chinese_handoff_illustrations(self):
+    def test_root_readme_keeps_its_five_handoff_images(self):
         """Keep each visual explanation linked to a shipped project asset."""
         marketplace_root = next(
             candidate for candidate in (ROOT, *ROOT.parents)
@@ -226,6 +226,7 @@ class PluginMetadataTests(unittest.TestCase):
             "assets/codex-handoff-01-carry-forward.png",
             "assets/codex-handoff-02-handoff-envelope.png",
             "assets/codex-handoff-03-quota-guard.png",
+            "assets/codex-handoff-04-protective-block.png",
         )
         for illustration in illustrations:
             with self.subTest(illustration=illustration):

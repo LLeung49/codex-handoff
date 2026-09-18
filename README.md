@@ -111,6 +111,11 @@ $handoff-continue
 | 同一已锁存轮中的后续受支持本地工具 | `PreToolUse` 可在执行前拒绝它 |
 | 自动压缩 | 强但不阻断的提醒 |
 
+<p align="center">
+  <img src="assets/codex-handoff-04-protective-block.png" alt="观测到quota不足3%，停止后续工具调用" width="100%">
+</p>
+
+
 额度保护只是**尽力而为**：它无法观察每一个模型动作，托管或特殊工具路径可能绕过本地 hook。不要为了测试而耗尽额度。当日常工作自然到达 3% 或以下时，可以请求两个无害的本地命令：要么 prompt guard 在工作开始前阻断，要么第一个已完成的工具结果会被保留，第二个受支持的本地工具会被拒绝。
 
 插件数据标记是本地、零内容的去重/latch 文件；它们不是项目的 `.handoff/` 文档，也不保存 handoff 内容。
