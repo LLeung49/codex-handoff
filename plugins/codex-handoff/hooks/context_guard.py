@@ -173,6 +173,14 @@ def _weekly_strong_reason() -> str:
     return "Weekly quota is nearly exhausted. Run $handoff-prepare before continuing in a fresh session."
 
 
+def _tool_stop_reason(reasons: list[str]) -> str:
+    """Describe a non-blocking stop advisory after a completed local tool."""
+    return " ".join(reasons + [
+        "The completed tool result is preserved. Stop expanding work, summarize the current state, "
+        "and run $handoff-prepare before continuing."
+    ])
+
+
 def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
     """Return the V1 quota decision for a user-prompt event."""
     try:
@@ -226,16 +234,39 @@ def handle_precompact(payload: dict, data_dir: Path) -> dict:
 
 
 def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
-    """Placeholder event handler; tool-loop detection is added in V2 Task 2."""
+    """Advise a handoff after a completed tool observes a strong quota window."""
     try:
         if not isinstance(payload, dict):
             return ALLOW
         if "agent_id" in payload:
             return ALLOW
-        if not isinstance(payload.get("session_id"), str) or not payload.get("session_id"):
+        session_id = payload.get("session_id")
+        turn_id = payload.get("turn_id")
+        transcript_path = payload.get("transcript_path")
+        if not isinstance(session_id, str) or not session_id:
             return ALLOW
-        if not isinstance(payload.get("turn_id"), str) or not payload.get("turn_id"):
+        if not isinstance(turn_id, str) or not turn_id or not isinstance(transcript_path, str):
             return ALLOW
+        primary = latest_primary_rate_limit(Path(transcript_path))
+        secondary = latest_secondary_rate_limit(Path(transcript_path))
+        reasons = []
+        for window, snapshot, level, reason in (
+            ("five-hour", primary, quota_warning(primary) if primary else None,
+             "Five-hour quota is nearly exhausted."),
+            ("weekly", secondary,
+             quota_warning(secondary, window_minutes=10080, soft_warning=False) if secondary else None,
+             "Weekly quota is nearly exhausted."),
+        ):
+            if level != "strong":
+                continue
+            resets_at = _number(snapshot.get("resets_at"))
+            if resets_at is None or resets_at <= time.time():
+                continue
+            _claim_marker(Path(data_dir), session_id, resets_at, level, window)
+            if claim_turn_latch(Path(data_dir), session_id, turn_id, resets_at, window):
+                reasons.append(reason)
+        if reasons:
+            return {"decision": "allow", "reason": _tool_stop_reason(reasons), "tool_stop": True}
         return ALLOW
     except Exception:
         return ALLOW

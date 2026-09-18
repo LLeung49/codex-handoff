@@ -57,6 +57,35 @@ def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id=
     return {"session_id": session_id, "transcript_path": str(transcript)}
 
 
+def post_tool_payload(directory, primary_used_percent=10, weekly_used_percent=None,
+                      session_id="session", turn_id="turn", resets_at=RESET):
+    """Create a PostToolUse payload backed by a Codex event_msg rollout."""
+    transcript = Path(directory) / f"post-tool-{session_id}-{turn_id}-{resets_at}.jsonl"
+    limits = {
+        "primary": {
+            "window_minutes": 300,
+            "used_percent": primary_used_percent,
+            "resets_at": resets_at,
+        },
+    }
+    if weekly_used_percent is not None:
+        limits["secondary"] = {
+            "window_minutes": 10080,
+            "used_percent": weekly_used_percent,
+            "resets_at": resets_at + 100,
+        }
+    transcript.write_text(json.dumps({
+        "type": "event_msg",
+        "payload": {"type": "token_count", "rate_limits": limits},
+    }) + "\n")
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "transcript_path": str(transcript),
+    }
+
+
 NON_NULL_EVENT = json.dumps({
     "type": "token_count",
     "rate_limits": {"primary": {"window_minutes": 300, "used_percent": 10, "resets_at": RESET}},
@@ -320,6 +349,96 @@ class DecisionTests(unittest.TestCase):
             marker_dir = Path(directory) / "markers"
             self.assertEqual(handle_post_tool_use({"turn_id": "t"}, marker_dir), ALLOW)
             self.assertFalse(marker_dir.exists())
+
+
+class ToolLoopTests(unittest.TestCase):
+    def setUp(self):
+        clock = patch("time.time", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def test_post_tool_use(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, primary_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertEqual(decision["decision"], "allow")
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("$handoff-prepare", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET, "five-hour"))
+
+    def test_post_tool_use_weekly_quota_creates_latch_and_advisory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, weekly_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertEqual(decision["decision"], "allow")
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("Weekly quota", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET + 100, "weekly"))
+
+    def test_post_tool_use_both_strong_claims_both_latches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            payload = post_tool_payload(directory, primary_used_percent=97, weekly_used_percent=97)
+
+            decision = handle_event(payload, data_dir)
+
+            self.assertTrue(decision["tool_stop"])
+            self.assertIn("Five-hour quota", decision["reason"])
+            self.assertIn("Weekly quota", decision["reason"])
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET, "five-hour"))
+            self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET + 100, "weekly"))
+
+    def test_post_tool_use_failures_fail_open_without_latch(self):
+        cases = ("healthy", "expired", "invalid", "missing-turn", "subagent", "unreadable", "storage")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                payload = post_tool_payload(directory, primary_used_percent=97)
+                if case == "healthy":
+                    payload = post_tool_payload(directory, primary_used_percent=96)
+                elif case == "expired":
+                    payload = post_tool_payload(directory, primary_used_percent=97, resets_at=NOW)
+                elif case == "invalid":
+                    Path(payload["transcript_path"]).write_text(json.dumps({
+                        "type": "event_msg",
+                        "payload": {"type": "token_count", "rate_limits": {"primary": {
+                            "window_minutes": 60, "used_percent": 97, "resets_at": RESET,
+                        }}},
+                    }) + "\n")
+                elif case == "missing-turn":
+                    payload.pop("turn_id")
+                elif case == "subagent":
+                    payload["agent_id"] = "child"
+                elif case == "unreadable":
+                    payload["transcript_path"] = str(Path(directory) / "missing.jsonl")
+
+                if case == "storage":
+                    with patch("hooks.context_guard._claim_marker", side_effect=OSError("read-only")):
+                        decision = handle_event(payload, data_dir)
+                else:
+                    decision = handle_event(payload, data_dir)
+
+                self.assertEqual(decision, ALLOW)
+                self.assertFalse(data_dir.exists())
+
+    def test_post_tool_use_consumes_prompt_strong_warning_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            post_tool = post_tool_payload(directory, primary_used_percent=97, session_id="shared")
+            prompt = {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "shared",
+                "transcript_path": post_tool["transcript_path"],
+            }
+
+            self.assertTrue(handle_event(post_tool, data_dir)["tool_stop"])
+            self.assertEqual(handle_event(prompt, data_dir), ALLOW)
 
 
 class HookOutputTests(unittest.TestCase):
