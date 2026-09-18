@@ -198,6 +198,20 @@ class PluginMetadataTests(unittest.TestCase):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
 
+    def test_root_readme_has_the_scannable_open_source_sections(self):
+        """Keep the public README's onboarding modules and original hero asset."""
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = (marketplace_root / "README.md").read_text()
+        for heading in ("## 🚀 Install", "## Why codex-handoff?", "## How it works",
+                        "## Skills", "## Quota guard"):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, readme)
+        self.assertIn("assets/codex-handoff-bridge.png", readme)
+        self.assertTrue((marketplace_root / "assets/codex-handoff-bridge.png").is_file())
+
     def test_plugin_readme_validates_all_v2_skills(self):
         """A released V2 plugin must validate the newly added setup skill."""
         readme = (ROOT / "README.md").read_text()
