@@ -3,7 +3,7 @@
 > Preserve the verified state of a long-running Codex task, then continue deliberately.
 
 <p align="center">
-  <img src="assets/codex-handoff-bridge.png" alt="A verified handoff carried from a low-quota workspace to a fresh one" width="100%">
+  <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
 </p>
 
 `codex-handoff` is a Codex plugin for the moment when a task still matters
@@ -76,6 +76,10 @@ you authorize the next scoped action
 The illustration above represents the intended behavior: carry verified work
 across the boundary instead of treating the next task as a blank slate.
 
+<p align="center">
+  <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
+</p>
+
 ## Skills
 
 ### 1. `$handoff-context-setup`
@@ -129,6 +133,10 @@ second supported local tool is denied.
 
 Plugin data markers are opaque, local, zero-content dedupe/latch files. They
 are not project `.handoff/` documents and do not contain handoff content.
+
+<p align="center">
+  <img src="assets/codex-handoff-03-quota-guard.png" alt="小黑保存已完成结果，并在额度低时停止后续工具调用" width="100%">
+</p>
 
 ## First check
 
