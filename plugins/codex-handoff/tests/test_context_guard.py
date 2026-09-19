@@ -311,32 +311,18 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("does not edit", content)
         self.assertIn("does not run commands", content)
 
-    def test_context_setup_requires_approval_before_writing(self):
+    def test_context_setup_proposes_only_the_optional_context_index(self):
         content = self.read_skill("handoff-context-setup")
         for requirement in (
             "read-only discovery", "explicit user approval", "exact source paths",
-            "draft", "Before approval, do not persist",
-            "docs/agent-context.md", "docs/project-status.md",
-        ):
-            self.assertIn(requirement, content)
-
-    def test_context_setup_bounds_sources_and_records_authority(self):
-        content = self.read_skill("handoff-context-setup")
-        for requirement in (
-            "at most eight", "source-of-truth hierarchy", "last verified",
+            "draft", "Before approval, do not persist", "docs/agent-context.md",
+            "source-of-truth hierarchy", "at most eight", "last verified",
             "known gaps", "Do not treat old plans as active",
+            "does not create or refresh `docs/project-status.md`",
             "Do not change `AGENTS.md`, `CLAUDE.md`, source code, or `.gitignore`",
         ):
             self.assertIn(requirement, content)
-
-    def test_context_setup_separates_status_from_authority(self):
-        content = self.read_skill("handoff-context-setup")
-        for requirement in (
-            "Delivered and accepted", "acceptance evidence", "One active work item",
-            "Blocked work", "Decisions awaiting the user", "Deferred candidates",
-            "not authorized", "latest task handoff", "remain the source of truth",
-        ):
-            self.assertIn(requirement, content)
+        self.assertNotIn("## Delivery Status Shape", content)
 
     def test_prepare_requires_scope_and_evidence(self):
         content = self.read_skill("handoff-prepare")
