@@ -43,7 +43,9 @@
 
 ### 4. 由你决定交接与继续
 
-当你准备好时，运行 `$handoff-prepare`。它会在项目的 `.handoff/` 中写入一份 Markdown 交接单，记录当前任务真正需要带走的内容。然后在一个新任务里运行 `$handoff-continue`：新的 agent 会先读交接单、说明它理解了什么，然后停下来等你授权下一步。
+当你准备好时，运行 `$handoff-prepare`。它会在项目的 `.handoff/` 中写入一份短的 Markdown 交接检查点：先告诉你断点、哪些内容只是**已验证**、哪些已经由你**已验收**，再列出唯一主线和下一步。然后在一个新任务里运行 `$handoff-continue`：新的 agent 会先读交接单、说明它理解了什么，然后停下来等你授权下一步。
+
+它不会把整个项目历史塞给新 agent。交接单把首次必读内容标为 **L1**，最多 3 项；背景资料标为 **L2**，默认不读，只有问题真的触发且你授权后才读取。新 agent 首轮最多提出 3 个具体澄清问题；你可以直接回答，或在原 session 仍有额度时请原 agent 写一份补遗。
 
 <p align="center">
   <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
@@ -107,9 +109,9 @@ codex plugin marketplace remove codex-handoff
 
 ## 三个技能分别做什么？
 
-- `$handoff-prepare`：把当前任务的目标、范围、已完成工作、证据、未决事项和下一步写成一份不可变交接单。
-- `$handoff-continue`：让新 agent 对齐这份交接单；它会先汇报理解结果，再等待你的授权。
-- `$handoff-context-setup`：可选。它先只读检查项目，再提议创建本地的长期上下文与进度文件；只有你批准后才会写入。
+- `$handoff-prepare`：把当前断点、目标、边界、交付/验收状态与唯一下一步写成一份不可变交接单。
+- `$handoff-continue`：让新 agent 先对齐 L1，说明未读的 L2 与需要澄清之处，再等待你的授权。
+- `$handoff-context-setup`：可选。它只提议创建稳定的 `agent-context.md` 背景索引；不再维护会过期的进度状态页。
 
 ## 想了解实现细节？
 

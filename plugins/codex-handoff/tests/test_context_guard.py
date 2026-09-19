@@ -193,7 +193,8 @@ class PluginMetadataTests(unittest.TestCase):
         for requirement in (
             "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
             "PostToolUse", "PreToolUse", "尽力而为", "不会自动切换会话",
-            "已完成的工具结果会被保留", "托管或特殊工具路径",
+            "已完成的工具结果会被保留", "托管或特殊工具路径", "已验证",
+            "已验收", "最多 3 项", "最多提出 3 个", "L1", "L2",
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
@@ -248,6 +249,15 @@ class PluginMetadataTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text()
         self.assertIn("skills/handoff-context-setup", readme)
 
+    def test_plugin_readme_documents_v21_context_budget(self):
+        readme = (ROOT / "README.md").read_text()
+        for requirement in (
+            "L1", "L2", "at most 3", "at most 5", "project-status.md",
+            "does not create or refresh",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, readme)
+
     def test_marketplace_points_to_the_nested_plugin(self):
         marketplace_root = next(
             (candidate for candidate in (ROOT, *ROOT.parents)
@@ -267,9 +277,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_2_0_release_version(self):
+    def test_plugin_manifest_uses_the_v0_2_1_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertTrue(manifest["version"].startswith("0.2.0+codex."))
+        self.assertRegex(manifest["version"], r"^0\.2\.1\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):

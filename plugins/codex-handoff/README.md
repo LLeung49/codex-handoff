@@ -23,13 +23,18 @@ It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.
 
-## V2 durable context and migration
+## V2.1 progressive handoff context and migration
 
-V1 handoffs still work unchanged. V2 durable context documents are opt-in:
-run `$handoff-context-setup` when you want a read-only proposal and, after
-explicit approval, durable project context. It does not create those documents
-as a handoff side effect. Use `$handoff-prepare` for one immutable handoff
-snapshot and `$handoff-continue` in a fresh task for its briefing.
+V1 handoffs still work unchanged. V2.1 makes a new handoff a compact user
+checkpoint: it distinguishes implemented, verified, and user-accepted delivery,
+then uses a progressive reading package. L1 has at most 3 read-now sources;
+L2 has at most 5 conditional sources and is not read during initial alignment.
+
+Run `$handoff-context-setup` when you want a read-only proposal for the optional
+durable `docs/agent-context.md` index. It does not create or refresh
+`docs/project-status.md`, and handoff workflows do not default-read that page.
+Use `$handoff-prepare` for one immutable checkpoint and `$handoff-continue` in
+a fresh task for its L0/L1 briefing and up-to-three targeted questions.
 
 The plugin's data markers are opaque, local, zero-content dedupe/latch files.
 They are not project `.handoff/` documents and contain no handoff content.
@@ -54,9 +59,6 @@ and choose when and where to start a fresh Codex session. In that new session,
 run `$handoff-continue` to read the handoff and receive a briefing. A handoff is
 context, not authorization: it does not authorize edits, commands, or its
 listed next step without your explicit direction.
-
-See [`docs/superpowers/specs/2026-09-16-codex-handoff-v1.md`](docs/superpowers/specs/2026-09-16-codex-handoff-v1.md)
-for the frozen V1 specification.
 
 ## Validate locally
 

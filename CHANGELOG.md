@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.2.1
 
 - Start the five-hour soft handoff nudge at 15% remaining rather than 25%; its
   one-time protective block remains at 3% remaining or below.
+- Make each new handoff a concise user checkpoint with delivery/acceptance
+  states, bounded L1/L2 reading, and an append-only clarification supplement.
+- Stop creating, refreshing, or default-reading `docs/project-status.md`;
+  optional `docs/agent-context.md` remains the durable context index.
 
 ## v0.2.0
 
