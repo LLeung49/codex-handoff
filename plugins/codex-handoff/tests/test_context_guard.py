@@ -351,17 +351,16 @@ class SkillContractTests(unittest.TestCase):
         ):
             self.assertIn(requirement, content)
 
-    def test_continue_reads_only_ordered_context(self):
+    def test_continue_reads_only_v21_initial_context(self):
         content = self.read_skill("handoff-continue")
         for requirement in (
-            "1. Repository instructions", "2. `docs/agent-context.md`",
-            "3. The selected handoff", "4. Only the handoff's required task-specific artifacts",
+            "L0", "L1", "L2", "Do not read L2 during initial alignment",
+            "zero to three", "missing fact", "affected delivery",
+            "preferred responder", "Single authorization request",
+            "does not run commands", "ends after",
         ):
             self.assertIn(requirement, content)
-        positions = [content.index(prefix) for prefix in ("1. Repository", "2. `docs/", "3. The selected", "4. Only")]
-        self.assertEqual(positions, sorted(positions))
         self.assertIn("Do not recursively follow links", content)
-        self.assertIn("at most eight", content)
 
     def test_continue_stops_after_alignment(self):
         content = self.read_skill("handoff-continue")

@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 FIXTURE = ROOT / "fixtures" / "handoff-v2-1.md"
+LEGACY_FIXTURE = ROOT / "fixtures" / "handoff-v1.md"
 
 
 def rows(text: str, heading: str) -> list[str]:
@@ -32,3 +33,12 @@ class V21FixtureTests(unittest.TestCase):
         for row in rows(text, "L2: read conditionally"):
             self.assertIn("Trigger:", row)
             self.assertIn("Answers:", row)
+
+
+class LegacyFixtureTests(unittest.TestCase):
+    def test_v1_fixture_remains_readable_without_v21_sections(self):
+        text = LEGACY_FIXTURE.read_text()
+        for heading in ("## Goal", "## Current state", "## Suggested next steps"):
+            self.assertIn(heading, text)
+        for v21_heading in ("## User checkpoint", "## Minimal reading package"):
+            self.assertNotIn(v21_heading, text)
