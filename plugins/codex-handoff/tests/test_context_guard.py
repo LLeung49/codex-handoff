@@ -324,27 +324,30 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(requirement, content)
         self.assertNotIn("## Delivery Status Shape", content)
 
-    def test_prepare_requires_scope_and_evidence(self):
+    def test_prepare_requires_v21_checkpoint_and_budget(self):
         content = self.read_skill("handoff-prepare")
         sections = (
-            "Original user objective", "Scope contract", "Required context",
-            "Current state", "Decisions and rationale", "Relevant artifacts",
-            "Evidence", "Known issues triage", "Git state", "Continuation contract",
+            "User checkpoint", "Task contract", "Delivery and acceptance ledger",
+            "Next action and boundary", "Minimal reading package", "Trace metadata",
+            "Continuation contract",
         )
         for section in sections:
             self.assertIn(section, content)
         positions = [content.index(section) for section in sections]
         self.assertEqual(positions, sorted(positions))
-        for requirement in ("stop condition", "reading manifest", "unverified", "expected base"):
+        for requirement in (
+            "implemented", "verified", "accepted", "in progress", "not started",
+            "blocked", "at most 3", "at most 5", "clarification supplement",
+            "Never overwrite",
+        ):
             self.assertIn(requirement, content)
 
-    def test_prepare_keeps_snapshot_immutable_and_status_opt_in(self):
+    def test_prepare_keeps_snapshot_immutable_without_status_page_output(self):
         content = self.read_skill("handoff-prepare")
         for requirement in (
             "one immutable", ".handoff/<UTC timestamp>-<slug>.md",
-            "Never overwrite", "status refresh in the same prompt",
-            "If either durable document is absent", "$handoff-context-setup",
-            "do not create it", "Do not change `.gitignore`",
+            "Never overwrite", "does not create or refresh `docs/project-status.md`",
+            "Do not change `.gitignore`",
         ):
             self.assertIn(requirement, content)
 
