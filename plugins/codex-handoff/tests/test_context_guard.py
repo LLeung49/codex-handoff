@@ -372,6 +372,22 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(requirement, content)
         self.assertIn("Do not recursively follow links", content)
 
+    def test_continue_excludes_supplements_from_default_selection(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "directly in `.handoff/`", ".handoff/clarifications/",
+            "not candidates for automatic selection", "user explicitly selects",
+        ):
+            self.assertIn(requirement, content)
+
+    def test_continue_reads_all_l0_decision_context_without_opening_l2(self):
+        content = self.read_skill("handoff-continue")
+        for requirement in (
+            "Decision/risk notes", "Minimal reading package metadata",
+            "without opening L2 sources",
+        ):
+            self.assertIn(requirement, content)
+
     def test_continue_stops_after_alignment(self):
         content = self.read_skill("handoff-continue")
         for requirement in (

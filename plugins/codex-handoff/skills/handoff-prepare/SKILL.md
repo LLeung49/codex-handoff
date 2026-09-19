@@ -105,8 +105,10 @@ a fresh session and invoke `$handoff-continue` with this path.
 
 If the original session still has capacity and a fresh agent has a material
 question, do not rewrite the parent handoff. Create a new timestamped
-clarification supplement that names the parent handoff, each question, answer,
-evidence, and uncertainty. The original agent may provide known facts,
+clarification supplement at
+`.handoff/clarifications/<UTC timestamp>-<slug>.md`; this keeps it out of
+automatic parent-handoff selection. It names the parent handoff, each question,
+answer, evidence, and uncertainty. The original agent may provide known facts,
 evidence, boundaries, or uncertainty only; it must not resume implementation,
 run new verification, or expand scope. A fresh agent reads a supplement only
 when the user identifies or approves it.

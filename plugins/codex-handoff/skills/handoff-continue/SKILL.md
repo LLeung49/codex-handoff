@@ -12,10 +12,13 @@ precedence.
 ## Select the handoff
 
 Accept an optional project-local handoff path or name fragment. If neither is
-supplied, select the newest timestamped Markdown file in `.handoff/`. Inspect
-only filenames to select it; read its contents in the bounded order below. If
-selection is ambiguous (including tied timestamps) or no handoff exists, ask the
-user to choose; do not guess or read every candidate.
+supplied, select the newest timestamped Markdown file directly in `.handoff/`.
+Do not search subdirectories. Files in `.handoff/clarifications/` are not
+candidates for automatic selection: a supplement is read only when the user
+explicitly selects or approves it. Inspect only filenames to select the parent
+handoff; read its contents in the bounded order below. If selection is ambiguous
+(including tied timestamps) or no handoff exists, ask the user to choose; do not
+guess or read every candidate.
 
 ## Initial alignment reading
 
@@ -28,7 +31,8 @@ For a V2.1 handoff, read in this order:
 
 1. Applicable repository instructions such as `AGENTS.md` or `CLAUDE.md`.
 2. **L0** in the selected handoff: User checkpoint, Task contract, Delivery and
-   acceptance ledger, Next action and boundary, and Trace metadata.
+   acceptance ledger, Next action and boundary, Decision/risk notes, Trace
+   metadata, and Minimal reading package metadata, without opening L2 sources.
 3. Only the selected handoff's **L1** sources, at most 3, in declared order.
 
 Do not read L2 during initial alignment. Report each L2 source intentionally
@@ -76,9 +80,10 @@ Suggested next steps remain proposals.
 ## Clarification supplements
 
 A clarification supplement is read only when the user identifies or approves
-it. Confirm that it names its parent handoff, question, answer, evidence, and
-uncertainty. Do not rewrite the parent handoff, create a supplement, or contact
-the original session from this skill.
+it. It resides in `.handoff/clarifications/` and is not an automatic selection
+candidate. Confirm that it names its parent handoff, question, answer, evidence,
+and uncertainty. Do not rewrite the parent handoff, create a supplement, or
+contact the original session from this skill.
 
 ## Scope escalation
 
