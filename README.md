@@ -47,14 +47,14 @@
 
 然后在一个新任务里运行 `$handoff-continue`。新 agent 只会先读交接单的核心摘要 **L0**，以及最多 3 项明确列出的 **L1** 必读资料；它会报告理解到的目标、证据、边界、缺口与故意未读的内容，然后停下来等你授权下一步。背景资料放在 **L2**，默认不读，只有某个具体问题真正触发、并得到你授权后才读取。它首轮最多提出 3 个具体澄清问题；你可以直接回答，或在原 session 仍有额度时请原 agent 写一份补遗。
 
+<p align="center">
+  <img src="assets/codex-handoff-05-layered-checkpoint.jpg" alt="小黑把杂乱项目资料压缩成 L0、L1 与受控 L2 的分层交接单" width="100%">
+</p>
+
 补遗不会覆盖原交接单，会放在 `.handoff/clarifications/` 并注明它回答的原始问题与证据；它不会被新 agent 自动选中或读取，只有你明确指定或同意后才会打开。这能避免“补充说明”意外改变已经确认的断点。
 
 <p align="center">
-  <img src="assets/codex-handoff-01-carry-forward.png" alt="小黑将目标、证据和边界带往新会话" width="100%">
-</p>
-
-<p align="center">
-  <img src="assets/codex-handoff-02-handoff-envelope.png" alt="小黑将目标、证据和边界封入 handoff，并等待下一位 agent 获得授权" width="100%">
+  <img src="assets/codex-handoff-06-clarification-loop.jpg" alt="用户选择最多三个澄清问题，旧会话用剩余额度回答，新会话带着答案先对齐" width="100%">
 </p>
 
 ## 会带来什么影响？

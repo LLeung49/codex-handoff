@@ -210,9 +210,9 @@ class PluginMetadataTests(unittest.TestCase):
                         "## 会带来什么影响？", "## 三步开始使用"):
             with self.subTest(heading=heading):
                 self.assertIn(heading, readme)
-        self.assertIn("assets/codex-handoff-01-carry-forward.png", readme)
+        self.assertIn("assets/codex-handoff-05-layered-checkpoint.jpg", readme)
         self.assertTrue(
-            (marketplace_root / "assets/codex-handoff-01-carry-forward.png").is_file()
+            (marketplace_root / "assets/codex-handoff-05-layered-checkpoint.jpg").is_file()
         )
 
     def test_root_readme_keeps_its_five_handoff_images(self):
@@ -224,10 +224,10 @@ class PluginMetadataTests(unittest.TestCase):
         readme = (marketplace_root / "README.md").read_text()
         illustrations = (
             "assets/codex-handoff-00-origin-story.png",
-            "assets/codex-handoff-01-carry-forward.png",
-            "assets/codex-handoff-02-handoff-envelope.png",
             "assets/codex-handoff-03-quota-guard.png",
             "assets/codex-handoff-04-protective-block.png",
+            "assets/codex-handoff-05-layered-checkpoint.jpg",
+            "assets/codex-handoff-06-clarification-loop.jpg",
         )
         for illustration in illustrations:
             with self.subTest(illustration=illustration):
