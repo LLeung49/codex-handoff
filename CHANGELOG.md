@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.3
+
+- Correct Windows plugin-root expansion by running the `commandWindows` hook
+  through `cmd.exe` and `%PLUGIN_ROOT%`. The previous `$PLUGIN_ROOT` spelling
+  was POSIX-only and resolved to an invalid script path on Windows.
+
 ## v0.2.2
 
 - Run the hook with `python` on Windows through Codex's `commandWindows`

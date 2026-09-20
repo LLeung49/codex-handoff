@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\"",
-            "commandWindows": "python \"$PLUGIN_ROOT/hooks/context_guard.py\""
+            "commandWindows": "cmd.exe /d /s /c python \"%PLUGIN_ROOT%/hooks/context_guard.py\""
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\"",
-            "commandWindows": "python \"$PLUGIN_ROOT/hooks/context_guard.py\""
+            "commandWindows": "cmd.exe /d /s /c python \"%PLUGIN_ROOT%/hooks/context_guard.py\""
           }
         ]
       }
@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\"",
-            "commandWindows": "python \"$PLUGIN_ROOT/hooks/context_guard.py\""
+            "commandWindows": "cmd.exe /d /s /c python \"%PLUGIN_ROOT%/hooks/context_guard.py\""
           }
         ]
       }
@@ -41,7 +41,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/hooks/context_guard.py\"",
-            "commandWindows": "python \"$PLUGIN_ROOT/hooks/context_guard.py\""
+            "commandWindows": "cmd.exe /d /s /c python \"%PLUGIN_ROOT%/hooks/context_guard.py\""
           }
         ]
       }

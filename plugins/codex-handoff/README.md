@@ -26,11 +26,14 @@ sessions automatically.
 ## Windows hook runtime
 
 Each command hook keeps `python3` for macOS/Linux and declares Codex's
-Windows-only `commandWindows` override as `python "$PLUGIN_ROOT/hooks/context_guard.py"`.
-Windows users therefore need a working Python 3 interpreter available as
-`python` on `PATH`; do not rely solely on the Microsoft Store `python3.exe`
-app-execution alias. After installing or updating this plugin, use `/hooks` to
-review and trust the changed hook definitions before starting a fresh task.
+Windows-only `commandWindows` override as
+`cmd.exe /d /s /c python "%PLUGIN_ROOT%/hooks/context_guard.py"`. This pins
+Windows expansion to `cmd.exe`; `$PLUGIN_ROOT` is POSIX syntax and must not be
+used there. Windows users therefore need a working Python 3 interpreter
+available as `python` on `PATH`; do not rely solely on the Microsoft Store
+`python3.exe` app-execution alias. After installing or updating this plugin,
+use `/hooks` to review and trust the changed hook definitions, then start a
+fresh task (or restart Codex if it still shows an older definition).
 
 ## V2.1 progressive handoff context and migration
 

@@ -88,11 +88,12 @@ codex plugin list
 
 #### Windows 使用说明
 
-从 v0.2.2 起，Windows 上的 hook 会调用 `python`，而 macOS/Linux 仍调用
-`python3`。因此 Windows 请先在终端确认 `python --version` 能运行，并确保它
-指向 Python 3；不要只依赖 Microsoft Store 的 `python3.exe` 执行别名。插件
-更新后，在 Codex 中打开 `/hooks`，审查并重新信任变更后的四个 hook，随后新开
-一个任务。
+从 v0.2.3 起，Windows 上的 hook 会通过 `cmd.exe` 调用 `python`，并使用
+Windows 的 `%PLUGIN_ROOT%` 变量语法；macOS/Linux 仍调用 `python3`。因此
+Windows 请先在终端确认 `python --version` 能运行，并确保它指向 Python 3；不要
+只依赖 Microsoft Store 的 `python3.exe` 执行别名。插件更新后，在 Codex 中打开
+`/hooks`，审查并重新信任变更后的四个 hook，关闭当前任务后新开一个任务；如仍
+显示旧定义，再重启 Codex。
 
 #### 已经安装过旧版本？
 
