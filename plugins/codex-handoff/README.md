@@ -23,6 +23,15 @@ It preserves project facts in a vendor-neutral Markdown handoff. You decide
 whether and where to start the fresh session; the plugin never switches
 sessions automatically.
 
+## Windows hook runtime
+
+Each command hook keeps `python3` for macOS/Linux and declares Codex's
+Windows-only `commandWindows` override as `python "$PLUGIN_ROOT/hooks/context_guard.py"`.
+Windows users therefore need a working Python 3 interpreter available as
+`python` on `PATH`; do not rely solely on the Microsoft Store `python3.exe`
+app-execution alias. After installing or updating this plugin, use `/hooks` to
+review and trust the changed hook definitions before starting a fresh task.
+
 ## V2.1 progressive handoff context and migration
 
 V1 handoffs still work unchanged. V2.1 makes a new handoff a compact user

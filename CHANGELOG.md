@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2
+
+- Run the hook with `python` on Windows through Codex's `commandWindows`
+  override, while retaining `python3` on macOS and Linux. This prevents the
+  Microsoft Store `python3.exe` alias from failing when a working `python.exe`
+  is on `PATH`.
+
 ## v0.2.1
 
 - Start the five-hour soft handoff nudge at 15% remaining rather than 25%; its

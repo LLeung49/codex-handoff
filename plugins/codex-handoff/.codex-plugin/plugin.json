@@ -1,6 +1,6 @@
 {
   "name": "codex-handoff",
-  "version": "0.2.1+codex.20260919060551",
+  "version": "0.2.2+codex.20260920045642",
   "description": "Protects manual handoffs before context compaction or an exhausted Coding Plan quota window.",
   "author": {
     "name": "Local developer"

@@ -277,9 +277,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_2_1_release_version(self):
+    def test_plugin_manifest_uses_the_v0_2_2_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.2\.1\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.2\.2\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -293,8 +293,9 @@ class HookConfigurationTests(unittest.TestCase):
         """Relative paths run from the session cwd, not the plugin directory."""
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
         for event in hooks["hooks"]:
-            command = hooks["hooks"][event][0]["hooks"][0]["command"]
-            self.assertEqual(command, 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
+            handler = hooks["hooks"][event][0]["hooks"][0]
+            self.assertEqual(handler["command"], 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
+            self.assertEqual(handler["commandWindows"], 'python "$PLUGIN_ROOT/hooks/context_guard.py"')
 
     def test_tool_hooks_match_all_tools_synchronously(self):
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
@@ -304,6 +305,7 @@ class HookConfigurationTests(unittest.TestCase):
                 "hooks": [{
                     "type": "command",
                     "command": 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"',
+                    "commandWindows": 'python "$PLUGIN_ROOT/hooks/context_guard.py"',
                 }],
             }])
 

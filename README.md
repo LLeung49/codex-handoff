@@ -86,6 +86,14 @@ codex plugin list
 
 确认 `codex-handoff@codex-handoff` 已安装并启用后，新开一个 **Codex 任务**，让它加载新的 hook 和 skill。
 
+#### Windows 使用说明
+
+从 v0.2.2 起，Windows 上的 hook 会调用 `python`，而 macOS/Linux 仍调用
+`python3`。因此 Windows 请先在终端确认 `python --version` 能运行，并确保它
+指向 Python 3；不要只依赖 Microsoft Store 的 `python3.exe` 执行别名。插件
+更新后，在 Codex 中打开 `/hooks`，审查并重新信任变更后的四个 hook，随后新开
+一个任务。
+
 #### 已经安装过旧版本？
 
 重新安装即可更新插件：
