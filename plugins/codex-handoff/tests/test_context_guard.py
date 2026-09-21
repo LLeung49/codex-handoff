@@ -640,6 +640,23 @@ class ToolLoopTests(unittest.TestCase):
             self.assertTrue(handle_event(post_tool, data_dir)["tool_stop"])
             self.assertEqual(handle_event(prompt, data_dir), ALLOW)
 
+    def test_post_tool_only_latches_the_turn_that_claims_the_strong_warning(self):
+        """A later low-quota turn must be able to prepare the requested handoff."""
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            first = post_tool_payload(
+                directory, weekly_used_percent=97, session_id="shared", turn_id="first",
+            )
+            later = post_tool_payload(
+                directory, weekly_used_percent=97, session_id="shared", turn_id="later",
+            )
+
+            self.assertTrue(handle_event(first, data_dir)["tool_stop"])
+            self.assertEqual(handle_event(later, data_dir), ALLOW)
+            self.assertEqual(handle_event({
+                "hook_event_name": "PreToolUse", "session_id": "shared", "turn_id": "later",
+            }, data_dir), ALLOW)
+
 
 class HookOutputTests(unittest.TestCase):
     def test_allow_decision_emits_no_json(self):

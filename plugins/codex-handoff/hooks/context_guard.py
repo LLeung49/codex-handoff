@@ -169,6 +169,15 @@ def turn_latch_exists(
     )
 
 
+def claim_strong_tool_stop(
+    data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
+) -> bool:
+    """Claim one strong warning and latch only the turn that claimed it."""
+    if not _claim_marker(data_dir, session_id, resets_at, "strong", window):
+        return False
+    return claim_turn_latch(data_dir, session_id, turn_id, resets_at, window)
+
+
 def _soft_reason() -> str:
     return "Five-hour quota is low. Consider $handoff-prepare before starting a fresh session."
 
@@ -273,8 +282,7 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
             resets_at = _number(snapshot.get("resets_at"))
             if resets_at is None or resets_at <= time.time():
                 continue
-            _claim_marker(Path(data_dir), session_id, resets_at, level, window)
-            if claim_turn_latch(Path(data_dir), session_id, turn_id, resets_at, window):
+            if claim_strong_tool_stop(Path(data_dir), session_id, turn_id, resets_at, window):
                 reasons.append(reason)
         if reasons:
             return {"decision": "allow", "reason": _tool_stop_reason(reasons), "tool_stop": True}
