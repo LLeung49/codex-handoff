@@ -200,7 +200,7 @@ class PluginMetadataTests(unittest.TestCase):
             "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
             "PostToolUse", "PreToolUse", "尽力而为", "不会自动切换会话",
             "已完成的工具结果会被保留", "托管或特殊工具路径", "已验证",
-            "已验收", "最多 3 项", "最多提出 3 个", "L1", "L2",
+            "已验收", "继续开发", "L1", "L2",
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
@@ -283,9 +283,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_2_3_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_0_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.2\.3\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.0\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):

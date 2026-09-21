@@ -51,14 +51,17 @@ a fresh task for its L0/L1 briefing and up-to-three targeted questions.
 The plugin's data markers are opaque, local, zero-content dedupe/latch files.
 They are not project `.handoff/` documents and contain no handoff content.
 
-## V2 quota guard limits
+## V3 quota guard limits
 
 At the strong threshold, `PostToolUse` keeps a completed tool result available
-and records a same-turn latch. A subsequent supported local tool can be denied
-by `PreToolUse` with a handoff message. This guard is best effort: it cannot
-observe every model action, and hosted or special tool paths may bypass it.
-Invoke `$handoff-prepare` deliberately when you need a handoff; the guard does
-not switch sessions automatically.
+and records a latch only for the turn that claimed the warning. A subsequent
+supported local tool in that same turn can be denied by `PreToolUse`; later
+turns at the same quota reset do not re-latch merely because they read a skill
+or create a handoff. The next user prompt explicitly chooses
+`$handoff-prepare` to save a checkpoint or `继续开发` to resume the paused
+request. This guard is best effort: it cannot observe every model action, and
+hosted or special tool paths may bypass it. It does not switch sessions
+automatically.
 
 For safe live validation, run synthetic hook tests first. Then, only when
 normal work naturally reaches the threshold, observe one harmless supported

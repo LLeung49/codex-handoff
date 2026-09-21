@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0
+
+- Stop only the active tool loop that first reaches the strong quota warning;
+  later turns in the same reset window no longer create a fresh latch.
+- After a protective stop, require the user's explicit choice:
+  `$handoff-prepare` saves a checkpoint and `继续开发` resumes the paused task.
+- Make handoff skills capability-neutral: they guide progressive context reading
+  and authorization boundaries without rejecting normal host read mechanisms.
+
 ## v0.2.3
 
 - Correct Windows plugin-root expansion by running the `commandWindows` hook
