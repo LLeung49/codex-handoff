@@ -327,10 +327,12 @@ class SkillContractTests(unittest.TestCase):
         self.assertTrue(path.is_file(), f"Missing skill: {name}")
         return " ".join(path.read_text().split())
 
-    def test_continue_skill_forbids_automatic_execution(self):
+    def test_continue_skill_uses_guidance_not_a_capability_firewall(self):
         content = self.read_skill("handoff-continue")
-        self.assertIn("does not edit", content)
-        self.assertIn("does not run commands", content)
+        self.assertIn("does not authorize", content)
+        self.assertIn("any available read-only mechanism", content)
+        self.assertIn("Get-Content", content)
+        self.assertNotIn("do not use command execution as a fallback", content)
 
     def test_context_setup_proposes_only_the_optional_context_index(self):
         content = self.read_skill("handoff-context-setup")
@@ -375,10 +377,10 @@ class SkillContractTests(unittest.TestCase):
     def test_continue_reads_only_v21_initial_context(self):
         content = self.read_skill("handoff-continue")
         for requirement in (
-            "L0", "L1", "L2", "Do not read L2 during initial alignment",
+            "L0", "L1", "L2", "Do not automatically read L1 or L2 during initial alignment",
             "zero to three", "missing fact", "affected delivery",
             "preferred responder", "Single authorization request",
-            "does not run commands", "ends after",
+            "any available read-only mechanism", "ends after",
         ):
             self.assertIn(requirement, content)
         self.assertIn("Do not recursively follow links", content)
@@ -402,10 +404,10 @@ class SkillContractTests(unittest.TestCase):
     def test_continue_stops_after_alignment(self):
         content = self.read_skill("handoff-continue")
         for requirement in (
-            "context-alignment report", "ends after", "does not run commands",
+            "context-alignment report", "ends after", "does not authorize",
             "loaded sources", "missing/ambiguous sources", "stop condition",
             "confirmed evidence", "unverified claims", "user decisions",
-            "user authorizes a scoped next action", "commits, pushes",
+            "user-authorized scoped action", "commits, pushes",
         ):
             self.assertIn(requirement, content)
 

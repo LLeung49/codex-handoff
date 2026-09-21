@@ -22,10 +22,10 @@ guess or read every candidate.
 
 ## Initial alignment reading
 
-Use read-only listing and document-reading capabilities. This is permission to
-read bounded context, not to execute shell commands. If those capabilities are
-unavailable, report the access limitation and stop; do not use command execution
-as a fallback.
+Use any available read-only mechanism to read the user-selected checkpoint,
+including native document readers or terminal readers such as `Get-Content`.
+The constraint is context size, not tool capability. Do not use the handoff as
+a reason to scan unrelated history, branches, or artifacts.
 
 For a V2.1 handoff, read in this order:
 
@@ -33,13 +33,16 @@ For a V2.1 handoff, read in this order:
 2. **L0** in the selected handoff: User checkpoint, Task contract, Delivery and
    acceptance ledger, Next action and boundary, Decision/risk notes, Trace
    metadata, and Minimal reading package metadata, without opening L2 sources.
-3. Only the selected handoff's **L1** sources, at most 3, in declared order.
+3. Stop with this L0 orientation unless a specific uncertainty prevents the
+   user-authorized next action. Read only the minimum cited L1 or L2 source
+   that answers that uncertainty; labels are reading hints, not auto-load rules.
 
-Do not read L2 during initial alignment. Report each L2 source intentionally
-not read. If a later user-authorized scoped action meets its declared trigger,
-ask before reading that L2 source. An L2 entry is not permission for automatic
-reading. Do not recursively follow links, scan archived plans, inspect other
-branches, or expand into artifacts merely listed as relevant.
+Do not automatically read L1 or L2 during initial alignment. Report material
+sources intentionally not read. If a later user-authorized scoped action meets
+its declared trigger, read the minimum source needed for that action. An L1 or
+L2 entry is not permission for automatic reading. Do not recursively follow
+links, scan archived plans, inspect other branches, or expand into artifacts
+merely listed as relevant.
 
 If an L1 source is missing, stale, or contradictory, report it rather than
 replacing it with repository discovery. Missing, stale, or contradictory sources
@@ -102,8 +105,9 @@ is not implicit approval to fix it.
 
 ## Safety boundary
 
-This skill ends after the report. It does not edit the workspace and does not run
-commands. It does not run verification, commits, pushes, create or resume
-sessions, or begin any listed next step. Successful reading is not work
-authorization. End the turn and wait until the user authorizes a scoped next
-action before operational work.
+This skill ends after the report. Successful reading is not work authorization:
+the handoff does not authorize verification, edits, commits, pushes, session
+changes, or a listed next step. Wait for the user to authorize a scoped action
+before operational work. This is a decision boundary, not a host-tool
+restriction; use the normal capabilities supplied by the active environment
+when the user has authorized the work.

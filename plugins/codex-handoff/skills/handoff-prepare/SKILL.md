@@ -116,6 +116,9 @@ when the user identifies or approves it.
 ## Boundaries
 
 Do not change `.gitignore`; the repository owner chooses the handoff policy.
-Do not edit source code or repository instructions, create, resume, or switch
-sessions. Do not imply that the handoff, supplement, or a suggested next action
-authorizes commands, verification, edits, commits, pushes, or future work.
+Do not use checkpoint preparation to silently expand the task, invent evidence,
+or replace an explicit user decision. Do not imply that the handoff, supplement,
+or a suggested next action authorizes verification, edits, commits, pushes,
+session changes, or future work. These are behavior boundaries, not host-tool
+restrictions: use the normal capabilities supplied by the active environment
+when the user separately authorizes work.
