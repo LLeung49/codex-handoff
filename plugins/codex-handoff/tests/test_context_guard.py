@@ -29,7 +29,7 @@ def rate_limit(used_percent):
     return {"window_minutes": 300, "used_percent": used_percent, "resets_at": RESET}
 
 
-def prompt_payload(directory, used_percent, session_id="session", resets_at=RESET):
+def prompt_payload(directory, used_percent, session_id="session", resets_at=RESET, prompt=None):
     """Create a direct token-count transcript for a prompt-hook input."""
     transcript = Path(directory) / f"rollout-{session_id}-{resets_at}.jsonl"
     transcript.write_text(json.dumps({
@@ -40,10 +40,13 @@ def prompt_payload(directory, used_percent, session_id="session", resets_at=RESE
             "resets_at": resets_at,
         }},
     }) + "\n")
-    return {"session_id": session_id, "transcript_path": str(transcript)}
+    payload = {"session_id": session_id, "transcript_path": str(transcript)}
+    if prompt is not None:
+        payload["prompt"] = prompt
+    return payload
 
 
-def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id="session"):
+def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id="session", prompt=None):
     """Create telemetry with a healthy 5h window and a weekly quota snapshot."""
     transcript = Path(directory) / f"rollout-{session_id}-weekly.jsonl"
     transcript.write_text(json.dumps({
@@ -57,7 +60,10 @@ def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id=
             },
         },
     }) + "\n")
-    return {"session_id": session_id, "transcript_path": str(transcript)}
+    payload = {"session_id": session_id, "transcript_path": str(transcript)}
+    if prompt is not None:
+        payload["prompt"] = prompt
+    return payload
 
 
 def post_tool_payload(directory, primary_used_percent=10, weekly_used_percent=None,
@@ -430,12 +436,15 @@ class DecisionTests(unittest.TestCase):
         clock.start()
         self.addCleanup(clock.stop)
 
-    def test_real_rollout_blocks_once(self):
+    def test_real_rollout_allows_explicit_handoff_after_the_block(self):
         with tempfile.TemporaryDirectory() as directory:
-            payload = {"session_id": "real", "transcript_path": str(ROOT / "tests/fixtures/codex-rollout.jsonl")}
+            payload = {
+                "session_id": "real", "transcript_path": str(ROOT / "tests/fixtures/codex-rollout.jsonl"),
+                "prompt": "ordinary work",
+            }
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
-            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
 
     def test_expired_or_current_reset_allows_without_marker(self):
         """Missing expiry validation would block and write a stale marker."""
@@ -458,22 +467,40 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
             self.assertFalse(data_dir.exists())
 
-    def test_strong_warning_blocks_only_once(self):
-        """Removing the atomic marker would make the repeat prompt block."""
+    def test_strong_warning_waits_for_an_explicit_user_choice(self):
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload(directory, used_percent=97, session_id="s")
+            payload = prompt_payload(directory, used_percent=97, session_id="s", prompt="ordinary work")
             data_dir = Path(directory) / "markers"
-            self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
-            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+            first = handle_event(payload, data_dir)
+            self.assertEqual(first["decision"], "block")
+            self.assertIn("$handoff-prepare", first["reason"])
+            self.assertIn("继续开发", first["reason"])
+            self.assertNotIn("$handoff-continue", first["reason"])
+            self.assertEqual(handle_event({**payload, "prompt": "keep coding"}, data_dir)["decision"], "block")
+            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
 
-    def test_weekly_limit_blocks_once_at_three_percent_remaining(self):
+    def test_weekly_limit_allows_exact_continue_at_three_percent_remaining(self):
         with tempfile.TemporaryDirectory() as directory:
-            payload = prompt_payload_with_weekly_limit(directory, weekly_used_percent=97, session_id="weekly")
+            payload = prompt_payload_with_weekly_limit(
+                directory, weekly_used_percent=97, session_id="weekly", prompt="ordinary work",
+            )
             data_dir = Path(directory) / "markers"
             first = handle_event(payload, data_dir)
             self.assertEqual(first["decision"], "block")
             self.assertIn("Weekly quota", first["reason"])
-            self.assertEqual(handle_event(payload, data_dir), {"decision": "allow"})
+            continued = handle_event({**payload, "prompt": "继续开发"}, data_dir)
+            self.assertEqual(continued["decision"], "allow")
+            self.assertIn("Resuming the paused request", continued["reason"])
+
+    def test_pending_choice_is_scoped_to_the_active_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            first = prompt_payload(directory, used_percent=97, session_id="s", prompt="ordinary work")
+            reset = prompt_payload(
+                directory, used_percent=97, session_id="s", resets_at=RESET + 300, prompt="new work",
+            )
+            self.assertEqual(handle_event(first, data_dir)["decision"], "block")
+            self.assertEqual(handle_event(reset, data_dir)["decision"], "block")
 
     def test_soft_warning_allows_with_one_handoff_nudge(self):
         """Removing soft-level deduplication would repeat the nudge."""
@@ -635,6 +662,7 @@ class ToolLoopTests(unittest.TestCase):
                 "hook_event_name": "UserPromptSubmit",
                 "session_id": "shared",
                 "transcript_path": post_tool["transcript_path"],
+                "prompt": "$handoff-prepare",
             }
 
             self.assertTrue(handle_event(post_tool, data_dir)["tool_stop"])
@@ -795,4 +823,13 @@ class ToolLoopOutputTests(unittest.TestCase):
                 "permissionDecisionReason": pre_output["systemMessage"],
             })
             self.assertIsNone(run_hook({**pre_payload, "turn_id": "new-turn"}))
-            self.assertIsNone(run_hook({**payload, "hook_event_name": "UserPromptSubmit"}))
+            blocked = run_hook({
+                **payload, "hook_event_name": "UserPromptSubmit", "turn_id": "new-turn",
+                "prompt": "ordinary work",
+            })
+            self.assertEqual(blocked["decision"], "block")
+            self.assertIn("继续开发", blocked["reason"])
+            self.assertIsNone(run_hook({
+                **payload, "hook_event_name": "UserPromptSubmit", "turn_id": "new-turn",
+                "prompt": "$handoff-prepare",
+            }))

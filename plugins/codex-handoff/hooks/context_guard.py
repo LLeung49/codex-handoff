@@ -132,6 +132,30 @@ def _marker_exists(data_dir: Path, *key_parts: object) -> bool:
         return False
 
 
+def _pending_choice_exists(
+    data_dir: Path, session_id: str, resets_at: int | float, window: str
+) -> bool:
+    """Return whether this still-active quota window awaits the user's choice."""
+    return _marker_exists(data_dir, session_id, resets_at, "pending-choice", window)
+
+
+def _claim_pending_choice(
+    data_dir: Path, session_id: str, resets_at: int | float, window: str
+) -> bool:
+    """Record the minimal choice state without retaining any prompt content."""
+    return _claim_marker(data_dir, session_id, resets_at, "pending-choice", window)
+
+
+def _clear_pending_choice(
+    data_dir: Path, session_id: str, resets_at: int | float, window: str
+) -> None:
+    """Consume a choice marker, failing open when local storage is unavailable."""
+    try:
+        _marker_path(data_dir, session_id, resets_at, "pending-choice", window).unlink(missing_ok=True)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def _turn_latch_dir(data_dir: Path, session_id: str, turn_id: str) -> Path:
     """Group full-key latches for lookup without rereading quota telemetry."""
     return _marker_path(data_dir, session_id, turn_id, "tool-stop").with_suffix(".latches")
@@ -175,7 +199,10 @@ def claim_strong_tool_stop(
     """Claim one strong warning and latch only the turn that claimed it."""
     if not _claim_marker(data_dir, session_id, resets_at, "strong", window):
         return False
-    return claim_turn_latch(data_dir, session_id, turn_id, resets_at, window)
+    if not claim_turn_latch(data_dir, session_id, turn_id, resets_at, window):
+        return False
+    _claim_pending_choice(data_dir, session_id, resets_at, window)
+    return True
 
 
 def _soft_reason() -> str:
@@ -193,11 +220,22 @@ def _weekly_strong_reason() -> str:
     return "Weekly quota is nearly exhausted. Run $handoff-prepare before continuing in a fresh session."
 
 
+def _choice_reason(reasons: list[str]) -> str:
+    """Describe the only two user-controlled responses after a strong stop."""
+    prefix = " ".join(reasons)
+    if prefix:
+        prefix += " "
+    return (
+        prefix
+        + "This work is paused because the quota is nearly exhausted. Reply "
+        "`$handoff-prepare` to save a checkpoint, or reply `继续开发` to resume the paused work."
+    )
+
+
 def _tool_stop_reason(reasons: list[str]) -> str:
     """Describe a non-blocking stop advisory after a completed local tool."""
-    return " ".join(reasons + [
-        "The completed tool result is preserved. Stop expanding work, summarize the current state, "
-        "and run $handoff-prepare before continuing."
+    return _choice_reason(reasons + [
+        "The completed tool result is preserved. Stop expanding work and summarize the current state."
     ])
 
 
@@ -214,7 +252,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             return ALLOW
         primary = latest_primary_rate_limit(Path(transcript_path))
         secondary = latest_secondary_rate_limit(Path(transcript_path))
-        strong_reasons = []
+        strong_windows = []
         for window, snapshot, level, reason in (
             ("five-hour", primary, quota_warning(primary) if primary else None, _strong_reason()),
             ("weekly", secondary,
@@ -224,12 +262,34 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             if level != "strong":
                 continue
             resets_at = _number(snapshot.get("resets_at"))
-            if resets_at is not None and resets_at > time.time() and _claim_marker(
-                Path(data_dir), session_id, resets_at, level, window
-            ):
+            if resets_at is not None and resets_at > time.time():
+                strong_windows.append((window, resets_at, reason))
+
+        pending = [
+            (window, resets_at) for window, resets_at, _ in strong_windows
+            if _pending_choice_exists(Path(data_dir), session_id, resets_at, window)
+        ]
+        if pending:
+            prompt = payload.get("prompt")
+            choice = prompt.strip() if isinstance(prompt, str) else None
+            if choice in ("$handoff-prepare", "继续开发"):
+                for window, resets_at in pending:
+                    _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
+                if choice == "继续开发":
+                    return {
+                        "decision": "allow",
+                        "reason": "Resuming the paused request; treat this as continuation, not a new task.",
+                    }
+                return ALLOW
+            return {"decision": "block", "reason": _choice_reason([])}
+
+        strong_reasons = []
+        for window, resets_at, reason in strong_windows:
+            if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
+                _claim_pending_choice(Path(data_dir), session_id, resets_at, window)
                 strong_reasons.append(reason)
         if strong_reasons:
-            return {"decision": "block", "reason": " ".join(strong_reasons)}
+            return {"decision": "block", "reason": _choice_reason(strong_reasons)}
 
         if primary:
             level = quota_warning(primary)
