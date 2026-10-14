@@ -97,17 +97,22 @@ Windows 请先在终端确认 `python --version` 能运行，并确保它指向 
 
 #### 已经安装过旧版本？
 
-重新安装即可更新插件：
+更新插件时，需刷新 Marketplace 缓存以获取 GitHub 远端最新代码：
 
 ```bash
 codex plugin remove codex-handoff@codex-handoff
+codex plugin marketplace remove codex-handoff
+codex plugin marketplace add LLeung49/codex-handoff --ref main
 codex plugin add codex-handoff@codex-handoff
 codex plugin list
 ```
 
-如果确定不再使用它，移除插件后还可以注销 marketplace：
+> **提示**：Codex CLI 会在本地缓存 Marketplace 仓库。更新版本时，请先 `marketplace remove` 再重新 `marketplace add`，以确保拉取远端最新提交，避免反复装回本地旧缓存。
+
+如果确定不再使用它，移除插件后注销 marketplace 即可：
 
 ```bash
+codex plugin remove codex-handoff@codex-handoff
 codex plugin marketplace remove codex-handoff
 ```
 
