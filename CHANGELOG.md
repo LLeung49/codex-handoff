@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+- Adjust the one-time protective block threshold from 3% to 5% remaining quota, while keeping the soft warning tier starting at 15%.
+- Allow `$codex-handoff:handoff-prepare` and its natural language variants as safe-exit commands that immediately unlock pending blocks.
+- Ensure choosing `继续开发` (or `继续` / `continue`) permanently suppresses further blocks and tool stops in the active session until quota is fully exhausted.
+
 ## v0.3.0
 
 - Stop only the active tool loop that first reaches the strong quota warning;

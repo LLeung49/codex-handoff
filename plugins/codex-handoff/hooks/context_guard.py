@@ -7,6 +7,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from typing import Any
@@ -96,9 +97,9 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
     if used is None or not 0 <= used <= 100:
         return None
     remaining = 100 - used
-    if remaining > 15 or (not soft_warning and remaining > 3):
+    if remaining > 15 or (not soft_warning and remaining > 5):
         return None
-    if remaining > 3:
+    if remaining > 5:
         return "soft"
     return "strong"
 
@@ -228,7 +229,8 @@ def _choice_reason(reasons: list[str]) -> str:
     return (
         prefix
         + "This work is paused because the quota is nearly exhausted. Reply "
-        "`$handoff-prepare` to save a checkpoint, or reply `继续开发` to resume the paused work."
+        "`$codex-handoff:handoff-prepare` (or `$handoff-prepare`) to save a checkpoint, "
+        "or reply `继续开发` to resume the paused work."
     )
 
 
@@ -237,6 +239,27 @@ def _tool_stop_reason(reasons: list[str]) -> str:
     return _choice_reason(reasons + [
         "The completed tool result is preserved. Stop expanding work and summarize the current state."
     ])
+
+
+HANDOFF_COMMAND_RE = re.compile(
+    r"(?<![\w-]|\$)\$?(?:codex-handoff:)?handoff-prepare\b",
+    re.IGNORECASE,
+)
+
+
+def is_handoff_command(prompt: object) -> bool:
+    """Check if the user prompt is invoking handoff-prepare."""
+    if not isinstance(prompt, str):
+        return False
+    return bool(HANDOFF_COMMAND_RE.search(prompt))
+
+
+def is_continue_command(prompt: object) -> bool:
+    """Check if the user prompt is requesting to continue development."""
+    if not isinstance(prompt, str):
+        return False
+    p = prompt.strip().lower()
+    return p in ("继续开发", "继续", "continue") or p.startswith("继续开发")
 
 
 def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
@@ -265,24 +288,44 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             if resets_at is not None and resets_at > time.time():
                 strong_windows.append((window, resets_at, reason))
 
+        prompt = payload.get("prompt")
+
+        # 1. Handoff command is a safe exit: clear pending choices, claim strong, and allow immediately
+        if is_handoff_command(prompt):
+            for window, resets_at, _ in strong_windows:
+                _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
+                _claim_marker(Path(data_dir), session_id, resets_at, "strong", window)
+            return ALLOW
+
+        active_resets = [
+            r for r in (_number(s.get("resets_at")) if s else None for s in (primary, secondary))
+            if r is not None and r > time.time()
+        ]
+
+        # 2. If user already chose to continue in this session, do not block or warn again
+        if any(_marker_exists(Path(data_dir), session_id, r, "user-continue") for r in active_resets):
+            return ALLOW
+
+        # 3. Check for pending choices from a previous block
         pending = [
             (window, resets_at) for window, resets_at, _ in strong_windows
             if _pending_choice_exists(Path(data_dir), session_id, resets_at, window)
         ]
         if pending:
-            prompt = payload.get("prompt")
-            choice = prompt.strip() if isinstance(prompt, str) else None
-            if choice in ("$handoff-prepare", "继续开发"):
+            if is_continue_command(prompt):
                 for window, resets_at in pending:
                     _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
-                if choice == "继续开发":
-                    return {
-                        "decision": "allow",
-                        "reason": "Resuming the paused request; treat this as continuation, not a new task.",
-                    }
-                return ALLOW
+                for r in active_resets:
+                    _claim_marker(Path(data_dir), session_id, r, "user-continue")
+                for window, resets_at, _ in strong_windows:
+                    _claim_marker(Path(data_dir), session_id, resets_at, "strong", window)
+                return {
+                    "decision": "allow",
+                    "reason": "Resuming the paused request; treat this as continuation, not a new task.",
+                }
             return {"decision": "block", "reason": _choice_reason([])}
 
+        # 4. First-time block when quota reaches strong threshold (<= 5%)
         strong_reasons = []
         for window, resets_at, reason in strong_windows:
             if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
@@ -291,6 +334,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
         if strong_reasons:
             return {"decision": "block", "reason": _choice_reason(strong_reasons)}
 
+        # 5. Soft warning between 5% and 15% (non-blocking)
         if primary:
             level = quota_warning(primary)
             resets_at = _number(primary.get("resets_at"))
@@ -329,6 +373,14 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
             return ALLOW
         primary = latest_primary_rate_limit(Path(transcript_path))
         secondary = latest_secondary_rate_limit(Path(transcript_path))
+
+        active_resets = [
+            r for r in (_number(s.get("resets_at")) if s else None for s in (primary, secondary))
+            if r is not None and r > time.time()
+        ]
+        if any(_marker_exists(Path(data_dir), session_id, r, "user-continue") for r in active_resets):
+            return ALLOW
+
         reasons = []
         for window, snapshot, level, reason in (
             ("five-hour", primary, quota_warning(primary) if primary else None,

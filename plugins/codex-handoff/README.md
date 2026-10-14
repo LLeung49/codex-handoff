@@ -10,12 +10,12 @@ selected by the repository Marketplace.
 long-running session before automatic context compaction or a low Coding Plan
 quota makes a useful handoff less likely.
 
-For the five-hour quota, it gives one soft nudge from 15% down to above 3% remaining,
-then applies one protective block at 3% remaining or below. This leaves room
+For the five-hour quota, it gives one soft nudge from 15% down to above 5% remaining,
+then applies one protective block at 5% remaining or below. This leaves room
 to use nearly the whole window while preserving a final turn for handoff.
 
 For the weekly quota, it has no soft-warning tier: it applies one independent
-protective block at 3% remaining or below. Each window deduplicates against
+protective block at 5% remaining or below. Each window deduplicates against
 its own reset time; if both reach the threshold together, Codex receives one
 block that reports both conditions.
 

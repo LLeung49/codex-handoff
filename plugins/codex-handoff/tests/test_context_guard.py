@@ -149,7 +149,9 @@ class TelemetryTests(unittest.TestCase):
         self.assertIsNone(quota_warning(rate_limit(84.9)))
         self.assertEqual(quota_warning(rate_limit(85)), "soft")
         self.assertEqual(quota_warning(rate_limit(90)), "soft")
-        self.assertEqual(quota_warning(rate_limit(96)), "soft")
+        self.assertEqual(quota_warning(rate_limit(94.9)), "soft")
+        self.assertEqual(quota_warning(rate_limit(95)), "strong")
+        self.assertEqual(quota_warning(rate_limit(96)), "strong")
         self.assertEqual(quota_warning(rate_limit(97)), "strong")
 
     def test_quota_warning_ignores_unsupported_window(self):
@@ -283,9 +285,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_0_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_1_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.3\.0\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.1\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -481,6 +483,64 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event({**payload, "prompt": "keep coding"}, data_dir)["decision"], "block")
             self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
 
+    def test_namespaced_and_natural_handoff_commands_unblock(self):
+        for cmd in (
+            "$codex-handoff:handoff-prepare",
+            "codex-handoff:handoff-prepare",
+            "请执行 $codex-handoff:handoff-prepare",
+            "请执行 $handoff-prepare 保存状态",
+        ):
+            with self.subTest(cmd=cmd), tempfile.TemporaryDirectory() as directory:
+                payload = prompt_payload(directory, used_percent=95, session_id="ns", prompt="work")
+                data_dir = Path(directory) / "markers"
+                self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
+                self.assertEqual(handle_event({**payload, "prompt": cmd}, data_dir), ALLOW)
+
+    def test_proactive_handoff_is_never_blocked_at_low_quota(self):
+        """A proactive handoff prompt at or below 5% quota must be allowed without block."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=96, session_id="p", prompt="$codex-handoff:handoff-prepare")
+            data_dir = Path(directory) / "markers"
+            self.assertEqual(handle_event(payload, data_dir), ALLOW)
+
+    def test_continue_burns_remaining_quota_without_further_blocks_or_stops(self):
+        """Choosing to continue development suppresses all further blocks and tool stops in the session."""
+        with tempfile.TemporaryDirectory() as directory:
+            payload = prompt_payload(directory, used_percent=95, session_id="burn", prompt="start feature")
+            data_dir = Path(directory) / "markers"
+            first = handle_event(payload, data_dir)
+            self.assertEqual(first["decision"], "block")
+
+            # User chooses to continue
+            continued = handle_event({**payload, "prompt": "继续开发"}, data_dir)
+            self.assertEqual(continued["decision"], "allow")
+
+            # Subsequent prompt turns in the same session and window are silent ALLOW
+            for quota in (96, 98, 99):
+                turn_payload = prompt_payload(directory, used_percent=quota, session_id="burn", prompt="keep working")
+                self.assertEqual(handle_event(turn_payload, data_dir), ALLOW)
+
+            # Tool executions (PostToolUse) in continuation turns are silent ALLOW
+            post_tool = post_tool_payload(directory, primary_used_percent=99, session_id="burn", turn_id="turn-later")
+            self.assertEqual(handle_event(post_tool, data_dir), ALLOW)
+
+            # PreToolUse in continuation turns is also ALLOW
+            pre_tool = {
+                "hook_event_name": "PreToolUse",
+                "session_id": "burn",
+                "turn_id": "turn-later",
+            }
+            self.assertEqual(handle_event(pre_tool, data_dir), ALLOW)
+
+    def test_continue_variations_recognized(self):
+        for choice in ("继续开发", "继续", "continue", "Continue", "继续开发当前功能"):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as directory:
+                payload = prompt_payload(directory, used_percent=95, session_id="var", prompt="work")
+                data_dir = Path(directory) / "markers"
+                self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
+                continued = handle_event({**payload, "prompt": choice}, data_dir)
+                self.assertEqual(continued["decision"], "allow")
+
     def test_weekly_limit_allows_exact_continue_at_three_percent_remaining(self):
         with tempfile.TemporaryDirectory() as directory:
             payload = prompt_payload_with_weekly_limit(
@@ -630,7 +690,7 @@ class ToolLoopTests(unittest.TestCase):
                 data_dir = Path(directory) / "markers"
                 payload = post_tool_payload(directory, primary_used_percent=97)
                 if case == "healthy":
-                    payload = post_tool_payload(directory, primary_used_percent=96)
+                    payload = post_tool_payload(directory, primary_used_percent=90)
                 elif case == "expired":
                     payload = post_tool_payload(directory, primary_used_percent=97, resets_at=NOW)
                 elif case == "invalid":
