@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.3
+
+- Raise the one-time five-hour and weekly protective block threshold from 5%
+  to 6% remaining; the five-hour soft nudge now ends above 6%.
+- Refresh the public README and illustrations to show the user's explicit
+  choice, L0-first progressive reading, and optional clarification.
+
 ## v0.3.2
 
 - Read hook input as UTF-8 JSON bytes instead of using the Windows Python pipe

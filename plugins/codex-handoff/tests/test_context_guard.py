@@ -149,10 +149,24 @@ class TelemetryTests(unittest.TestCase):
         self.assertIsNone(quota_warning(rate_limit(84.9)))
         self.assertEqual(quota_warning(rate_limit(85)), "soft")
         self.assertEqual(quota_warning(rate_limit(90)), "soft")
-        self.assertEqual(quota_warning(rate_limit(94.9)), "soft")
+        self.assertEqual(quota_warning(rate_limit(93.9)), "soft")
+        self.assertEqual(quota_warning(rate_limit(94)), "strong")
+        self.assertEqual(quota_warning(rate_limit(94.9)), "strong")
         self.assertEqual(quota_warning(rate_limit(95)), "strong")
         self.assertEqual(quota_warning(rate_limit(96)), "strong")
         self.assertEqual(quota_warning(rate_limit(97)), "strong")
+
+    def test_weekly_strong_warning_starts_at_six_percent_remaining(self):
+        self.assertIsNone(quota_warning(
+            {**rate_limit(93.9), "window_minutes": 10080},
+            window_minutes=10080,
+            soft_warning=False,
+        ))
+        self.assertEqual(quota_warning(
+            {**rate_limit(94), "window_minutes": 10080},
+            window_minutes=10080,
+            soft_warning=False,
+        ), "strong")
 
     def test_quota_warning_ignores_unsupported_window(self):
         self.assertIsNone(quota_warning({"window_minutes": 60, "used_percent": 90}))
@@ -218,9 +232,9 @@ class PluginMetadataTests(unittest.TestCase):
                         "## 会带来什么影响？", "## 三步开始使用"):
             with self.subTest(heading=heading):
                 self.assertIn(heading, readme)
-        self.assertIn("assets/codex-handoff-05-layered-checkpoint.jpg", readme)
+        self.assertIn("assets/codex-handoff-05-progressive-checkpoint-v2.png", readme)
         self.assertTrue(
-            (marketplace_root / "assets/codex-handoff-05-layered-checkpoint.jpg").is_file()
+            (marketplace_root / "assets/codex-handoff-05-progressive-checkpoint-v2.png").is_file()
         )
 
     def test_root_readme_keeps_its_five_handoff_images(self):
@@ -232,10 +246,10 @@ class PluginMetadataTests(unittest.TestCase):
         readme = (marketplace_root / "README.md").read_text()
         illustrations = (
             "assets/codex-handoff-00-origin-story.png",
-            "assets/codex-handoff-03-quota-guard.png",
+            "assets/codex-handoff-03-quota-guard-v2.png",
             "assets/codex-handoff-04-protective-block.png",
-            "assets/codex-handoff-05-layered-checkpoint.jpg",
-            "assets/codex-handoff-06-clarification-loop.jpg",
+            "assets/codex-handoff-05-progressive-checkpoint-v2.png",
+            "assets/codex-handoff-06-optional-clarification-v2.png",
         )
         for illustration in illustrations:
             with self.subTest(illustration=illustration):
@@ -251,6 +265,17 @@ class PluginMetadataTests(unittest.TestCase):
         readme = (marketplace_root / "README.md").read_text()
         self.assertNotIn("docs/superpowers", readme)
         self.assertIn("/docs/", (marketplace_root / ".gitignore").read_text())
+
+    def test_root_readme_explains_current_quota_and_progressive_handoff(self):
+        marketplace_root = next(
+            candidate for candidate in (ROOT, *ROOT.parents)
+            if (candidate / ".agents/plugins/marketplace.json").exists()
+        )
+        readme = (marketplace_root / "README.md").read_text()
+        for requirement in ("高于 6%", "≤6%", "继续开发", "0 到 3 个具体问题", "按需", "L0"):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, readme)
+        self.assertNotIn("L1（现在读）", readme)
 
     def test_plugin_readme_validates_all_v2_skills(self):
         """A released V2 plugin must validate the newly added setup skill."""
@@ -285,9 +310,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_2_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_3_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.3\.2\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.3\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -485,6 +510,17 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event({**payload, "prompt": "keep coding"}, data_dir)["decision"], "block")
             self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
 
+    def test_prompt_blocks_at_six_percent_for_each_quota_window(self):
+        for window in ("five-hour", "weekly"):
+            with self.subTest(window=window), tempfile.TemporaryDirectory() as directory:
+                if window == "five-hour":
+                    payload = prompt_payload(directory, used_percent=94, prompt="ordinary work")
+                else:
+                    payload = prompt_payload_with_weekly_limit(
+                        directory, weekly_used_percent=94, prompt="ordinary work",
+                    )
+                self.assertEqual(handle_event(payload, Path(directory) / "markers")["decision"], "block")
+
     def test_namespaced_and_natural_handoff_commands_unblock(self):
         for cmd in (
             "$codex-handoff:handoff-prepare",
@@ -499,7 +535,7 @@ class DecisionTests(unittest.TestCase):
                 self.assertEqual(handle_event({**payload, "prompt": cmd}, data_dir), ALLOW)
 
     def test_proactive_handoff_is_never_blocked_at_low_quota(self):
-        """A proactive handoff prompt at or below 5% quota must be allowed without block."""
+        """A proactive handoff prompt at or below 6% quota must be allowed without block."""
         with tempfile.TemporaryDirectory() as directory:
             payload = prompt_payload(directory, used_percent=96, session_id="p", prompt="$codex-handoff:handoff-prepare")
             data_dir = Path(directory) / "markers"
@@ -659,6 +695,21 @@ class ToolLoopTests(unittest.TestCase):
             self.assertTrue(decision["tool_stop"])
             self.assertIn("$handoff-prepare", decision["reason"])
             self.assertTrue(turn_latch_exists(data_dir, "session", "turn", RESET, "five-hour"))
+
+    def test_post_tool_stops_at_six_percent_for_each_quota_window(self):
+        for window in ("five-hour", "weekly"):
+            with self.subTest(window=window), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                payload = post_tool_payload(
+                    directory,
+                    primary_used_percent=94 if window == "five-hour" else 10,
+                    weekly_used_percent=94 if window == "weekly" else None,
+                )
+                decision = handle_event(payload, data_dir)
+                self.assertEqual(decision["decision"], "allow")
+                self.assertTrue(decision["tool_stop"])
+                reset = RESET if window == "five-hour" else RESET + 100
+                self.assertTrue(turn_latch_exists(data_dir, "session", "turn", reset, window))
 
     def test_post_tool_use_weekly_quota_creates_latch_and_advisory(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -88,7 +88,7 @@ def latest_secondary_rate_limit(path: Path, tail_bytes: int = 262144) -> dict | 
 
 
 def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: bool = True) -> str | None:
-    """Classify remaining five-hour quota as no warning, soft, or strong."""
+    """Classify remaining quota as no warning, soft, or strong."""
     if not isinstance(rate_limit, dict):
         return None
     if _number(rate_limit.get("window_minutes")) != window_minutes:
@@ -97,9 +97,9 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
     if used is None or not 0 <= used <= 100:
         return None
     remaining = 100 - used
-    if remaining > 15 or (not soft_warning and remaining > 5):
+    if remaining > 15 or (not soft_warning and remaining > 6):
         return None
-    if remaining > 5:
+    if remaining > 6:
         return "soft"
     return "strong"
 
@@ -325,7 +325,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
                 }
             return {"decision": "block", "reason": _choice_reason([])}
 
-        # 4. First-time block when quota reaches strong threshold (<= 5%)
+        # 4. First-time block when quota reaches strong threshold (<= 6%)
         strong_reasons = []
         for window, resets_at, reason in strong_windows:
             if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
@@ -334,7 +334,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
         if strong_reasons:
             return {"decision": "block", "reason": _choice_reason(strong_reasons)}
 
-        # 5. Soft warning between 5% and 15% (non-blocking)
+        # 5. Soft warning above 6% and up to 15% (non-blocking)
         if primary:
             level = quota_warning(primary)
             resets_at = _number(primary.get("resets_at"))

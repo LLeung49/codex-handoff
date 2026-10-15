@@ -10,12 +10,12 @@ selected by the repository Marketplace.
 long-running session before automatic context compaction or a low Coding Plan
 quota makes a useful handoff less likely.
 
-For the five-hour quota, it gives one soft nudge from 15% down to above 5% remaining,
-then applies one protective block at 5% remaining or below. This leaves room
+For the five-hour quota, it gives one soft nudge from 15% down to above 6% remaining,
+then applies one protective block at 6% remaining or below. This leaves room
 to use nearly the whole window while preserving a final turn for handoff.
 
 For the weekly quota, it has no soft-warning tier: it applies one independent
-protective block at 5% remaining or below. Each window deduplicates against
+protective block at 6% remaining or below. Each window deduplicates against
 its own reset time; if both reach the threshold together, Codex receives one
 block that reports both conditions.
 
@@ -39,14 +39,17 @@ fresh task (or restart Codex if it still shows an older definition).
 
 V1 handoffs still work unchanged. V2.1 makes a new handoff a compact user
 checkpoint: it distinguishes implemented, verified, and user-accepted delivery,
-then uses a progressive reading package. L1 has at most 3 read-now sources;
-L2 has at most 5 conditional sources and is not read during initial alignment.
+then uses a progressive reading package. The first three sections are the L0
+briefing. L1 lists at most 3 and L2 at most 5 references to consult only when
+the authorized task needs them; neither tier is read automatically at intake.
 
 Run `$handoff-context-setup` when you want a read-only proposal for the optional
 durable `docs/agent-context.md` index. It does not create or refresh
 `docs/project-status.md`, and handoff workflows do not default-read that page.
 Use `$handoff-prepare` for one immutable checkpoint and `$handoff-continue` in
-a fresh task for its L0/L1 briefing and up-to-three targeted questions.
+a fresh task for its L0 briefing. The incoming agent may ask zero to three
+targeted questions when facts are missing, then waits for a scoped user action.
+Clarification supplements are not selected or read without the user's choice.
 
 The plugin's data markers are opaque, local, zero-content dedupe/latch files.
 They are not project `.handoff/` documents and contain no handoff content.
