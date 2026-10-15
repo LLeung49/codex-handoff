@@ -15,6 +15,12 @@
 - Non-goals: changing quota thresholds or adding new hooks.
 - Stop condition: user acceptance or a scoped follow-up decision.
 
+## Next action and boundary
+
+- Prerequisite: user chooses acceptance or release authorization.
+- One action if authorized: update the approved release metadata only, then report the diff for review.
+- Do not expand: do not redesign quota behavior or publish automatically.
+
 ## Delivery and acceptance ledger
 
 | Item | State | Evidence | User review action |
@@ -22,18 +28,12 @@
 | quota guard | verified | `tests/test_context_guard.py` passed | Confirm the displayed block message |
 | public release | not started | none | Authorize the release task |
 
-## Next action and boundary
-
-- Prerequisite: user chooses acceptance or release authorization.
-- Recommended action: update the approved release metadata only.
-- Do not expand: do not redesign quota behavior.
-
 ## Minimal reading package
 
-### L1: read now
-- `README.md` — Why now: public behavior; Authority: repository; Freshness: HEAD.
-- `plugins/codex-handoff/.codex-plugin/plugin.json` — Why now: release version; Authority: plugin manifest; Freshness: HEAD.
-- `plugins/codex-handoff/tests/test_context_guard.py` — Why now: verification evidence; Authority: test suite; Freshness: HEAD.
+### L1: next-action sources
+- `README.md` — Trigger: release metadata update authorized; Answers: current public behavior; Authority: repository; Freshness: HEAD.
+- `plugins/codex-handoff/.codex-plugin/plugin.json` — Trigger: release metadata update authorized; Answers: current version; Authority: plugin manifest; Freshness: HEAD.
+- `plugins/codex-handoff/tests/test_context_guard.py` — Trigger: guard evidence needed for acceptance; Answers: tested behavior; Authority: test suite; Freshness: HEAD.
 
 ### L2: read conditionally
 - `docs/release-policy.md` — Trigger: release scope is disputed; Answers: approved release boundaries; Authority: approved policy; Freshness: unknown.
@@ -50,4 +50,4 @@
 
 ## Continuation contract
 
-Read L0 and L1, report alignment and gaps, then wait for scoped user authorization.
+Read repository instructions and L0, report alignment and gaps, then wait for scoped user authorization. Do not automatically read L1 or L2.

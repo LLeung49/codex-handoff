@@ -27,45 +27,59 @@ including native document readers or terminal readers such as `Get-Content`.
 The constraint is context size, not tool capability. Do not use the handoff as
 a reason to scan unrelated history, branches, or artifacts.
 
-For a V2.1 handoff, read in this order:
+For a current-format handoff, read in this order:
 
 1. Applicable repository instructions such as `AGENTS.md` or `CLAUDE.md`.
-2. **L0** in the selected handoff: User checkpoint, Task contract, Delivery and
-   acceptance ledger, Next action and boundary, Decision/risk notes, Trace
-   metadata, and Minimal reading package metadata, without opening L2 sources.
-3. Stop with this L0 orientation unless a specific uncertainty prevents the
-   user-authorized next action. Read only the minimum cited L1 or L2 source
-   that answers that uncertainty; labels are reading hints, not auto-load rules.
+2. **L0: the first three sections** of the selected handoff — User checkpoint,
+   Task contract, and Next action and boundary. Use section-range reading when
+   available; if the reader returns the whole handoff, orient on these three
+   and do not follow the later links. An immediate blocker belongs in L0.
+3. Stop with this L0 orientation. Do not read the ledger, risks, trace, L1, or
+   L2 merely to make the first report exhaustive. Later, after the user
+   authorizes one scoped action, read only the minimum cited material that
+   answers a question needed for that action.
 
 Do not automatically read L1 or L2 during initial alignment. Report material
-sources intentionally not read. If a later user-authorized scoped action meets
-its declared trigger, read the minimum source needed for that action. An L1 or
-L2 entry is not permission for automatic reading. Do not recursively follow
+sources intentionally not read by category or count; do not recite every L2
+entry. If a later user-authorized scoped action meets its declared trigger,
+read the minimum source needed for that action. An L1 or L2 entry is not
+permission for automatic reading. Do not recursively follow
 links, scan archived plans, inspect other branches, or expand into artifacts
 merely listed as relevant.
 
-If an L1 source is missing, stale, or contradictory, report it rather than
-replacing it with repository discovery. Missing, stale, or contradictory sources
-require user direction; do not repair them or invent their contents. An existing
-`docs/project-status.md` is not default context and is read only when a handoff
-explicitly lists it in L1 or L2.
+For an **older V2.1** handoff where the ledger precedes Next action or the
+manifest says `L1: read now`, recover the same L0 facts from its User
+checkpoint, Task contract, and Next action. Do not treat `read now` as an
+automatic-read command. For V1/prior-V2 handoffs without L0/L1/L2, read only
+the selected handoff and repository instructions; mark absent fields and do
+not invent a reading manifest. A missing manifest grants no extra reading.
 
-For V1/prior-V2 handoffs without L0/L1/L2, read only the selected handoff and
-repository instructions. Mark V2.1 fields absent. A missing manifest grants no
-extra reading.
+If a needed linked source is missing, stale, local-only/untracked, or
+contradictory, report the uncertainty rather than replacing it with broad
+repository discovery. Do not repair it or invent its contents. An existing
+`docs/project-status.md` is not default context and is read only when a handoff
+explicitly lists it as a source needed for the authorized action.
+
+An old claim that a process or batch "is running" is a **timestamped snapshot**,
+not current status. After authorization, revalidate the process, **batch
+identity**, progress, and guardrails before monitoring it or changing course.
+A PID alone is insufficient; do not launch a duplicate runner. If a supplement
+is present, distinguish `resolved`, `blocking`, `pending`, and `separate`
+proposals against its evidence and approved acceptance criteria. A supplement
+does not authorize a new workstream.
 
 ## Context-alignment report
 
 Produce one **context-alignment report** in this exact order:
 
 1. **User checkpoint** — current breakpoint, verified-but-not-accepted items,
-   incomplete main line, and user decisions needed now.
+   incomplete main line, and user decisions needed now. Distinguish a decision
+   about the plan from authorization to run the proposed next action.
 2. **Alignment record** — selected path, loaded sources, missing/ambiguous
-   sources, stale or contradictory sources, and every L2 source intentionally
-   not read.
+   sources, stale or contradictory sources, and deferred material by category.
 3. **Contract check** — restated objective, scope, non-goals, stop condition,
-   confirmed evidence, unverified claims, and decisions/rationale that affect
-   the next action.
+   confirmed evidence, unverified claims, and rationale that affects only the
+   next action; do not replay the whole roadmap or acceptance ledger.
 4. **Clarification questions** — ask zero to three only when a material
    uncertainty remains. Every question names the missing fact, affected delivery
    or acceptance/action, and preferred responder: the user, a named project
@@ -73,7 +87,8 @@ Produce one **context-alignment report** in this exact order:
    questions such as “anything else should I know?”, and do not use questions to
    avoid reading L1.
 5. **Single authorization request** — ask the user to accept a named item,
-   authorize one scoped next action, or revise the scope.
+   authorize one scoped next action, or revise the scope. A "continue" request
+   is not a blanket approval for later phases.
 
 For a V1 handoff, include Goal, Current state, Suggested next steps, Gotchas and
 failed approaches, and Open questions when available. Mark missing V2.1 sections

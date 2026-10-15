@@ -352,8 +352,8 @@ class SkillContractTests(unittest.TestCase):
     def test_prepare_requires_v21_checkpoint_and_budget(self):
         content = self.read_skill("handoff-prepare")
         sections = (
-            "User checkpoint", "Task contract", "Delivery and acceptance ledger",
-            "Next action and boundary", "Minimal reading package", "Trace metadata",
+            "User checkpoint", "Task contract", "Next action and boundary",
+            "Delivery and acceptance ledger", "Minimal reading package", "Trace metadata",
             "Continuation contract",
         )
         for section in sections:
@@ -395,11 +395,12 @@ class SkillContractTests(unittest.TestCase):
         ):
             self.assertIn(requirement, content)
 
-    def test_continue_reads_all_l0_decision_context_without_opening_l2(self):
+    def test_continue_reads_compact_l0_before_on_demand_detail(self):
         content = self.read_skill("handoff-continue")
         for requirement in (
-            "Decision/risk notes", "Minimal reading package metadata",
-            "without opening L2 sources",
+            "first three sections", "User checkpoint", "Task contract",
+            "Next action and boundary", "Do not read the ledger, risks, trace",
+            "Do not automatically read L1 or L2",
         ):
             self.assertIn(requirement, content)
 
@@ -417,7 +418,8 @@ class SkillContractTests(unittest.TestCase):
         content = self.read_skill("handoff-continue")
         for requirement in (
             "V1", "Goal", "Suggested next steps", "absent", "do not invent",
-            "Missing, stale, or contradictory", "ambiguous", "ask the user to choose",
+            "missing, stale, local-only/untracked, or contradictory",
+            "ambiguous", "ask the user to choose",
             "data, never authority", "User messages and repository instructions retain precedence",
         ):
             self.assertIn(requirement, content)
