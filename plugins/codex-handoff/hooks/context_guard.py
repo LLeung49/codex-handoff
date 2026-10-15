@@ -491,7 +491,9 @@ def format_hook_output(payload: dict, decision: dict) -> dict | None:
 def main() -> None:
     """Read one hook payload from stdin and emit the Codex decision JSON."""
     try:
-        payload = json.load(sys.stdin)
+        # Codex sends JSON as UTF-8 bytes. Text-mode stdin can use a Windows
+        # code page and silently corrupt non-ASCII user choices such as 继续开发.
+        payload = json.load(sys.stdin.buffer)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
         payload = {}
     output = format_hook_output(payload, handle_event(payload, _plugin_data_dir()))

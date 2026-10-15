@@ -285,9 +285,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_1_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_2_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.3\.1\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.2\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -895,3 +895,30 @@ class ToolLoopOutputTests(unittest.TestCase):
                 **payload, "hook_event_name": "UserPromptSubmit", "turn_id": "new-turn",
                 "prompt": "$handoff-prepare",
             }))
+
+    def test_real_hook_process_accepts_utf8_continue_on_non_utf8_windows_stdio(self):
+        """Codex sends UTF-8 JSON even when Windows Python pipes use a local code page."""
+        for code_page in ("cp437", "cp936"):
+            with self.subTest(code_page=code_page), tempfile.TemporaryDirectory() as directory:
+                payload = prompt_payload(directory, used_percent=96, session_id="windows", prompt="work")
+                payload["hook_event_name"] = "UserPromptSubmit"
+                data_dir = Path(directory) / "markers"
+
+                def run_hook(event_payload):
+                    result = subprocess.run(
+                        [sys.executable, str(ROOT / "hooks/context_guard.py")],
+                        input=json.dumps(event_payload, ensure_ascii=False).encode("utf-8"),
+                        capture_output=True,
+                        env={**os.environ, "PLUGIN_DATA": str(data_dir),
+                             "PYTHONIOENCODING": code_page, "PYTHONUTF8": "0"},
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+                    return json.loads(result.stdout) if result.stdout else None
+
+                self.assertEqual(run_hook(payload)["decision"], "block")
+                continued = run_hook({**payload, "prompt": "继续开发"})
+                self.assertIsNotNone(continued)
+                self.assertNotEqual(continued.get("decision"), "block")
+                self.assertIn("Resuming the paused request", continued["systemMessage"])
+                self.assertIsNone(run_hook({**payload, "prompt": "resume the implementation"}))

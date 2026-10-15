@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2
+
+- Read hook input as UTF-8 JSON bytes instead of using the Windows Python pipe
+  code page. This fixes `继续开发` being misread and blocked again after the user
+  explicitly chooses to continue; ASCII handoff commands were unaffected.
+
 ## v0.3.1
 
 - Adjust the one-time protective block threshold from 3% to 5% remaining quota, while keeping the soft warning tier starting at 15%.
