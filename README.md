@@ -32,7 +32,7 @@
 
 此时会出现两种情况：
 
-- **你刚提交一条新请求**：这次请求会先被阻止，agent 不会开始新一轮推理或执行。插件请你二选一：运行 `$handoff-prepare` 保存交接单，或只回复 `继续开发`，让 agent 继续原本暂停的任务；不需要重新描述原任务。
+- **你刚提交一条新请求**：这次请求会先被阻止，agent 不会开始新一轮推理或执行。插件请你二选一：运行 `$handoff-prepare` 保存交接单，或只回复英文 `continue`，让 agent 继续原本暂停的任务；不需要重新描述原任务。
 - **agent 正在调用本地工具**：已完成的工具结果会被保留；不会撤销该工具已经做过的事，也不会丢掉它的输出。随后同一轮中下一次受支持的本地工具调用会被拒绝，agent 停下来把选择权交还给你。
 
 <p align="center">
@@ -47,7 +47,7 @@
 
 ### 4. 由你决定交接与继续
 
-如果你想继续开发，直接回复 `继续开发`。Codex 会接着做原本暂停的事；插件不会在同一会话、同一额度窗口里反复拦你。继续消耗剩余额度的风险由你决定。
+如果你想继续开发，直接回复英文 `continue`。Codex 会接着做原本暂停的事；插件不会在同一会话、同一额度窗口里反复拦你。继续消耗剩余额度的风险由你决定。
 
 如果你想交接，就在**当前任务**运行 `$handoff-prepare`。它会在项目的 `.handoff/` 中写入一份不可变的 Markdown 交接单。最前面的三段只讲清楚：现在停在哪里、这项任务的目标和边界是什么、下一步建议做什么以及还需要你授权什么。后面的交付记录会区分“已实现 / 已验证 / 已验收 / 进行中 / 阻塞”，避免把测试通过误当成你已经验收。
 
@@ -68,7 +68,7 @@
 你应该预期这些行为和限制：
 
 - **不会自动切换会话**：不会帮你新建 agent、提交代码、推送仓库或开始下一步；所有继续动作都需要你决定。
-- **低额度时可能被打断一次**：五小时或周额度剩余 6% 或以下时，插件会为当前会话和本次额度窗口做一次保护性阻断。你选择 `继续开发` 后，同一会话和窗口不会反复被阻断；目的只是留住交接机会，而不是取消已完成工作。
+- **低额度时可能被打断一次**：五小时或周额度剩余 6% 或以下时，插件会为当前会话和本次额度窗口做一次保护性阻断。你回复 `continue` 后，同一会话和窗口不会反复被阻断；目的只是留住交接机会，而不是取消已完成工作。
 - **不会撤销已完成操作**：已经完成的工具结果、已经写入的文件和对话上下文仍然存在。它只会拒绝同一轮的后续受支持工具调用。
 - **不是百分之百的总开关**：额度保护只是**尽力而为**。托管或特殊工具路径可能绕过本地保护；如果读取额度信息失败，插件会放行，而不是误伤正常工作。
 - **自动压缩仍可发生**：自动压缩前会给出强提醒，但不会强行阻止压缩。需要交接时，请主动运行 `$handoff-prepare`。
@@ -90,15 +90,13 @@ codex plugin list
 
 #### Windows 使用说明
 
-从 v0.2.3 起，Windows 上的 hook 会通过 `cmd.exe` 调用 `python`，并使用
-Windows 的 `%PLUGIN_ROOT%` 变量语法；macOS/Linux 仍调用 `python3`。因此
-Windows 请先在终端确认 `python --version` 能运行，并确保它指向 Python 3；不要
-只依赖 Microsoft Store 的 `python3.exe` 执行别名。插件更新后，在 Codex 中打开
-`/hooks`，审查并重新信任变更后的四个 hook，关闭当前任务后新开一个任务；如仍
-显示旧定义，再重启 Codex。
+从 v0.3.4 起，Windows 上的 hook 直接执行
+`python "%PLUGIN_ROOT%\hooks\context_guard.py"`，不再额外嵌套
+`cmd.exe /s /c`，避免带引号的绝对路径被错误拼到当前项目目录后面。macOS/Linux
+仍调用 `python3`。Windows 请先在终端确认 `python --version` 能运行，并确保它
+指向 Python 3；不要只依赖 Microsoft Store 的 `python3.exe` 执行别名。
 
-如果旧版在你回复 `继续开发` 后仍重复阻断，请更新到 v0.3.2 或更新版本。
-旧版可暂时回复英文 `continue`；新版已修复 Windows 上中文输入的编码问题。
+从 v0.3.4 起，Hook 提示和机器交互指令统一使用 ASCII 英文。低额度下若要继续原任务，请只回复 `continue`；不再把本地化文字作为控制命令，避免 Windows 代码页和跨终端编码差异。
 
 #### 已经安装过旧版本？
 
@@ -114,6 +112,18 @@ codex plugin list
 
 > **提示**：Codex CLI 会在本地缓存 Marketplace 仓库。更新版本时，请先 `marketplace remove` 再重新 `marketplace add`，以确保拉取远端最新提交，避免反复装回本地旧缓存。
 
+#### 每次升级后：先重新部署，再做本地验收
+
+1. 按上面的命令移除插件和 Marketplace，再重新添加；不要直接拿旧缓存验证。
+2. 运行 `codex plugin list`，确认实际加载的是 README 所述的新版本。
+3. 在 Codex 中打开 `/hooks`，重新审查并信任四个已变化的 Hook。
+4. 关闭当前任务并新开一个任务；若仍显示旧定义，再重启 Codex。
+5. 在不重要的测试项目中发送：`Run python --version as a hook smoke test. Do not read or write project files.`
+
+这条请求会依次经过 `UserPromptSubmit`、`PreToolUse` 和 `PostToolUse`。命令成功且
+界面没有出现 `Hook failed`，才说明最常用的 Windows 启动链验证通过；不要只以
+`context_guard.py` 能单独运行作为安装成功的证据。
+
 如果确定不再使用它，移除插件后注销 marketplace 即可：
 
 ```bash
@@ -127,7 +137,7 @@ codex plugin marketplace remove codex-handoff
 
 ### 3. 需要换人时，做一次明确交接
 
-在当前任务运行 `$handoff-prepare`，检查 `.handoff/` 里生成的交接单能否说清：现在停在哪里、做了什么、证据是什么、哪些还没有验收、建议的下一步是什么、还需要你授权什么。若你决定不交接，直接回复 `继续开发` 即可恢复原任务。若开新任务，再运行 `$handoff-continue`；它先做对齐报告，你授权一个明确的下一步后才继续。
+在当前任务运行 `$handoff-prepare`，检查 `.handoff/` 里生成的交接单能否说清：现在停在哪里、做了什么、证据是什么、哪些还没有验收、建议的下一步是什么、还需要你授权什么。若你决定不交接，直接回复 `continue` 即可恢复原任务。若开新任务，再运行 `$handoff-continue`；它先做对齐报告，你授权一个明确的下一步后才继续。
 
 ## 三个技能分别做什么？
 
@@ -154,6 +164,8 @@ codex plugin marketplace remove codex-handoff
 git clone https://github.com/LLeung49/codex-handoff.git
 cd codex-handoff/plugins/codex-handoff
 python3 -m unittest discover -s tests -v
+cd ../..
+python3 scripts/validate_installed_plugin.py
 ```
 
 完整的插件与 skill 验证命令见 [插件源码 README](plugins/codex-handoff/README.md)。

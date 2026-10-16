@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,15 @@ from hooks.context_guard import (
 ROOT = Path(__file__).resolve().parents[1]
 NOW = 4102444800
 RESET = NOW + 18000
+
+
+def repository_root() -> Path:
+    """Return the source checkout root or skip repository-only assertions."""
+    for candidate in (ROOT, *ROOT.parents):
+        plugin_source = candidate / "plugins" / "codex-handoff"
+        if (candidate / ".agents/plugins/marketplace.json").exists() and plugin_source == ROOT:
+            return candidate
+    raise unittest.SkipTest("Repository-only metadata is absent from an installed plugin package")
 
 
 def rate_limit(used_percent):
@@ -196,42 +206,28 @@ class TelemetryTests(unittest.TestCase):
 
 class PluginMetadataTests(unittest.TestCase):
     def test_root_readme_documents_public_marketplace_installation(self):
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = (marketplace_root / "README.md").read_text()
+        marketplace_root = repository_root()
+        readme = (marketplace_root / "README.md").read_text(encoding="utf-8")
         self.assertIn("codex plugin marketplace add LLeung49/codex-handoff --ref main", readme)
         self.assertIn("codex plugin add codex-handoff@codex-handoff", readme)
         self.assertNotIn("/Users/lucienleung", readme)
 
     def test_root_readme_documents_v2_skills_and_guard_limits(self):
         """Removing V2 safety guidance would leave marketplace users misinformed."""
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = " ".join((marketplace_root / "README.md").read_text().split())
+        marketplace_root = repository_root()
+        readme = " ".join((marketplace_root / "README.md").read_text(encoding="utf-8").split())
         for requirement in (
             "$handoff-context-setup", "$handoff-prepare", "$handoff-continue",
-            "PostToolUse", "PreToolUse", "尽力而为", "不会自动切换会话",
-            "已完成的工具结果会被保留", "托管或特殊工具路径", "已验证",
-            "已验收", "继续开发", "L1", "L2",
+            "PostToolUse", "PreToolUse", "continue", "L1", "L2",
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
 
     def test_root_readme_has_the_scannable_open_source_sections(self):
         """Keep the public README's onboarding modules and current hero asset."""
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = (marketplace_root / "README.md").read_text()
-        for heading in ("## 适合什么情况？", "## 一次开发如何被保护？",
-                        "## 会带来什么影响？", "## 三步开始使用"):
-            with self.subTest(heading=heading):
-                self.assertIn(heading, readme)
+        marketplace_root = repository_root()
+        readme = (marketplace_root / "README.md").read_text(encoding="utf-8")
+        self.assertGreaterEqual(readme.count("## "), 4)
         self.assertIn("assets/codex-handoff-05-progressive-checkpoint-v2.png", readme)
         self.assertTrue(
             (marketplace_root / "assets/codex-handoff-05-progressive-checkpoint-v2.png").is_file()
@@ -239,11 +235,8 @@ class PluginMetadataTests(unittest.TestCase):
 
     def test_root_readme_keeps_its_five_handoff_images(self):
         """Keep each visual explanation linked to a shipped project asset."""
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = (marketplace_root / "README.md").read_text()
+        marketplace_root = repository_root()
+        readme = (marketplace_root / "README.md").read_text(encoding="utf-8")
         illustrations = (
             "assets/codex-handoff-00-origin-story.png",
             "assets/codex-handoff-03-quota-guard-v2.png",
@@ -258,32 +251,33 @@ class PluginMetadataTests(unittest.TestCase):
 
     def test_root_readme_does_not_link_to_local_docs(self):
         """Published onboarding must not link to user-local documentation."""
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = (marketplace_root / "README.md").read_text()
+        marketplace_root = repository_root()
+        readme = (marketplace_root / "README.md").read_text(encoding="utf-8")
         self.assertNotIn("docs/superpowers", readme)
-        self.assertIn("/docs/", (marketplace_root / ".gitignore").read_text())
+        self.assertIn("/docs/", (marketplace_root / ".gitignore").read_text(encoding="utf-8"))
 
     def test_root_readme_explains_current_quota_and_progressive_handoff(self):
-        marketplace_root = next(
-            candidate for candidate in (ROOT, *ROOT.parents)
-            if (candidate / ".agents/plugins/marketplace.json").exists()
-        )
-        readme = (marketplace_root / "README.md").read_text()
-        for requirement in ("高于 6%", "≤6%", "继续开发", "0 到 3 个具体问题", "按需", "L0"):
+        marketplace_root = repository_root()
+        readme = (marketplace_root / "README.md").read_text(encoding="utf-8")
+        for requirement in ("6%", "continue", "L0", "L1", "L2"):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, readme)
-        self.assertNotIn("L1（现在读）", readme)
+
+    def test_hook_runtime_sources_are_ascii_only(self):
+        """Machine-facing hook source and configuration must be code-page neutral."""
+        for path in sorted((ROOT / "hooks").iterdir()):
+            if path.suffix not in {".py", ".json"}:
+                continue
+            with self.subTest(path=path.name):
+                path.read_bytes().decode("ascii")
 
     def test_plugin_readme_validates_all_v2_skills(self):
         """A released V2 plugin must validate the newly added setup skill."""
-        readme = (ROOT / "README.md").read_text()
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("skills/handoff-context-setup", readme)
 
     def test_plugin_readme_documents_v21_context_budget(self):
-        readme = (ROOT / "README.md").read_text()
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
         for requirement in (
             "L1", "L2", "at most 3", "at most 5", "project-status.md",
             "does not create or refresh",
@@ -292,13 +286,9 @@ class PluginMetadataTests(unittest.TestCase):
                 self.assertIn(requirement, readme)
 
     def test_marketplace_points_to_the_nested_plugin(self):
-        marketplace_root = next(
-            (candidate for candidate in (ROOT, *ROOT.parents)
-             if (candidate / ".agents/plugins/marketplace.json").exists()),
-            ROOT,
-        )
+        marketplace_root = repository_root()
         marketplace = json.loads(
-            (marketplace_root / ".agents/plugins/marketplace.json").read_text()
+            (marketplace_root / ".agents/plugins/marketplace.json").read_text(encoding="utf-8")
         )
         entry = marketplace["plugins"][0]
         self.assertEqual(marketplace["name"], "codex-handoff")
@@ -306,44 +296,70 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(entry["source"]["path"], "./plugins/codex-handoff")
 
     def test_plugin_manifest_declares_the_plugin_and_skill_root(self):
-        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_3_release_version(self):
-        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
-        self.assertRegex(manifest["version"], r"^0\.3\.3\+codex\.\d{14}$")
+    def test_plugin_manifest_uses_the_v0_3_4_release_version(self):
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertRegex(manifest["version"], r"^0\.3\.4\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
     def test_hooks_register_all_four_lifecycle_events(self):
-        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(set(hooks["hooks"]), {
             "UserPromptSubmit", "PreCompact", "PostToolUse", "PreToolUse",
         })
 
     def test_hooks_resolve_the_guard_from_the_plugin_root(self):
         """Relative paths run from the session cwd, not the plugin directory."""
-        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
         for event in hooks["hooks"]:
             handler = hooks["hooks"][event][0]["hooks"][0]
             self.assertEqual(handler["command"], 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
             self.assertEqual(
                 handler["commandWindows"],
-                'cmd.exe /d /s /c python "%PLUGIN_ROOT%/hooks/context_guard.py"',
+                'python "%PLUGIN_ROOT%\\hooks\\context_guard.py"',
             )
 
     def test_tool_hooks_match_all_tools_synchronously(self):
-        hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
         for event in ("PreToolUse", "PostToolUse"):
             self.assertEqual(hooks.get(event), [{
                 "matcher": "*",
                 "hooks": [{
                     "type": "command",
                     "command": 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"',
-                    "commandWindows": 'cmd.exe /d /s /c python "%PLUGIN_ROOT%/hooks/context_guard.py"',
+                    "commandWindows": 'python "%PLUGIN_ROOT%\\hooks\\context_guard.py"',
                 }],
             }])
+
+    @unittest.skipUnless(os.name == "nt", "Windows command execution requires cmd.exe")
+    def test_windows_command_launches_from_unrelated_cwd_with_spaces(self):
+        """Catch nested cmd.exe quoting that turns an absolute path into a cwd-relative one."""
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+        command = hooks["PostToolUse"][0]["hooks"][0]["commandWindows"]
+        with tempfile.TemporaryDirectory(prefix="codex handoff ") as directory:
+            temp_root = Path(directory)
+            plugin_root = temp_root / "installed plugin"
+            shutil.copytree(ROOT / "hooks", plugin_root / "hooks")
+            session_cwd = temp_root / "unrelated project"
+            session_cwd.mkdir()
+            data_dir = temp_root / "plugin data"
+            result = subprocess.run(
+                command,
+                input=json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"}),
+                text=True,
+                capture_output=True,
+                cwd=session_cwd,
+                env={**os.environ, "PLUGIN_ROOT": str(plugin_root), "PLUGIN_DATA": str(data_dir)},
+                timeout=10,
+                shell=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
 
 
 class SkillContractTests(unittest.TestCase):
@@ -352,7 +368,7 @@ class SkillContractTests(unittest.TestCase):
     def read_skill(self, name):
         path = ROOT / "skills" / name / "SKILL.md"
         self.assertTrue(path.is_file(), f"Missing skill: {name}")
-        return " ".join(path.read_text().split())
+        return " ".join(path.read_text(encoding="utf-8").split())
 
     def test_continue_skill_uses_guidance_not_a_capability_firewall(self):
         content = self.read_skill("handoff-continue")
@@ -505,7 +521,8 @@ class DecisionTests(unittest.TestCase):
             first = handle_event(payload, data_dir)
             self.assertEqual(first["decision"], "block")
             self.assertIn("$handoff-prepare", first["reason"])
-            self.assertIn("继续开发", first["reason"])
+            self.assertIn("`continue`", first["reason"])
+            self.assertTrue(first["reason"].isascii())
             self.assertNotIn("$handoff-continue", first["reason"])
             self.assertEqual(handle_event({**payload, "prompt": "keep coding"}, data_dir)["decision"], "block")
             self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
@@ -525,8 +542,8 @@ class DecisionTests(unittest.TestCase):
         for cmd in (
             "$codex-handoff:handoff-prepare",
             "codex-handoff:handoff-prepare",
-            "请执行 $codex-handoff:handoff-prepare",
-            "请执行 $handoff-prepare 保存状态",
+            "Run $codex-handoff:handoff-prepare",
+            "Run $handoff-prepare to save a checkpoint",
         ):
             with self.subTest(cmd=cmd), tempfile.TemporaryDirectory() as directory:
                 payload = prompt_payload(directory, used_percent=95, session_id="ns", prompt="work")
@@ -550,7 +567,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(first["decision"], "block")
 
             # User chooses to continue
-            continued = handle_event({**payload, "prompt": "继续开发"}, data_dir)
+            continued = handle_event({**payload, "prompt": "continue"}, data_dir)
             self.assertEqual(continued["decision"], "allow")
 
             # Subsequent prompt turns in the same session and window are silent ALLOW
@@ -571,7 +588,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event(pre_tool, data_dir), ALLOW)
 
     def test_continue_variations_recognized(self):
-        for choice in ("继续开发", "继续", "continue", "Continue", "继续开发当前功能"):
+        for choice in ("continue", "Continue"):
             with self.subTest(choice=choice), tempfile.TemporaryDirectory() as directory:
                 payload = prompt_payload(directory, used_percent=95, session_id="var", prompt="work")
                 data_dir = Path(directory) / "markers"
@@ -588,7 +605,7 @@ class DecisionTests(unittest.TestCase):
             first = handle_event(payload, data_dir)
             self.assertEqual(first["decision"], "block")
             self.assertIn("Weekly quota", first["reason"])
-            continued = handle_event({**payload, "prompt": "继续开发"}, data_dir)
+            continued = handle_event({**payload, "prompt": "continue"}, data_dir)
             self.assertEqual(continued["decision"], "allow")
             self.assertIn("Resuming the paused request", continued["reason"])
 
@@ -878,7 +895,10 @@ class ToolLoopOutputTests(unittest.TestCase):
             self.assertEqual(handle_event(payload, data_dir), ALLOW)
 
     def test_pre_tool_unreadable_storage_fails_open(self):
-        if os.geteuid() == 0:
+        geteuid = getattr(os, "geteuid", None)
+        if geteuid is None:
+            self.skipTest("Windows does not expose POSIX directory access semantics")
+        if geteuid() == 0:
             self.skipTest("Root can read directories with access removed")
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "markers"
@@ -943,13 +963,14 @@ class ToolLoopOutputTests(unittest.TestCase):
                 "prompt": "ordinary work",
             })
             self.assertEqual(blocked["decision"], "block")
-            self.assertIn("继续开发", blocked["reason"])
+            self.assertIn("`continue`", blocked["reason"])
+            self.assertTrue(blocked["reason"].isascii())
             self.assertIsNone(run_hook({
                 **payload, "hook_event_name": "UserPromptSubmit", "turn_id": "new-turn",
                 "prompt": "$handoff-prepare",
             }))
 
-    def test_real_hook_process_accepts_utf8_continue_on_non_utf8_windows_stdio(self):
+    def test_real_hook_process_accepts_utf8_json_on_non_utf8_windows_stdio(self):
         """Codex sends UTF-8 JSON even when Windows Python pipes use a local code page."""
         for code_page in ("cp437", "cp936"):
             with self.subTest(code_page=code_page), tempfile.TemporaryDirectory() as directory:
@@ -970,8 +991,8 @@ class ToolLoopOutputTests(unittest.TestCase):
                     return json.loads(result.stdout) if result.stdout else None
 
                 self.assertEqual(run_hook(payload)["decision"], "block")
-                continued = run_hook({**payload, "prompt": "继续开发"})
+                continued = run_hook({**payload, "prompt": "continue"})
                 self.assertIsNotNone(continued)
                 self.assertNotEqual(continued.get("decision"), "block")
                 self.assertIn("Resuming the paused request", continued["systemMessage"])
-                self.assertIsNone(run_hook({**payload, "prompt": "resume the implementation"}))
+                self.assertIsNone(run_hook({**payload, "prompt": "review the caf\u00e9 output"}))

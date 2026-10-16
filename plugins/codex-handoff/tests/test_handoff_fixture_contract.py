@@ -28,7 +28,7 @@ def count_rows(text: str, heading: str) -> int:
 
 class V21FixtureTests(unittest.TestCase):
     def test_v21_fixture_has_bounded_progressive_disclosure(self):
-        text = FIXTURE.read_text()
+        text = FIXTURE.read_text(encoding="utf-8")
         self.assertIn("## User checkpoint", text)
         self.assertIn("## Delivery and acceptance ledger", text)
         self.assertLessEqual(count_rows(text, "L1: next-action sources"), 3)
@@ -38,7 +38,7 @@ class V21FixtureTests(unittest.TestCase):
             self.assertIn("Answers:", row)
 
     def test_l0_is_first_three_sections_and_does_not_auto_load_l1(self):
-        text = FIXTURE.read_text()
+        text = FIXTURE.read_text(encoding="utf-8")
         headings = [line for line in text.splitlines() if line.startswith("## ")]
         self.assertEqual(headings[0:3], [
             "## User checkpoint", "## Task contract", "## Next action and boundary",
@@ -47,7 +47,7 @@ class V21FixtureTests(unittest.TestCase):
         self.assertNotIn("Read L0 and L1", text)
 
     def test_active_rebuild_example_keeps_snapshot_and_authority_distinct(self):
-        text = ACTIVE_FIXTURE.read_text()
+        text = ACTIVE_FIXTURE.read_text(encoding="utf-8")
         l0 = text.split("## Delivery and acceptance ledger", 1)[0]
         self.assertIn("2026-10-14T17:42:52Z", l0)
         self.assertIn("market-full-qmt-20261014", l0)
@@ -62,7 +62,7 @@ class V21FixtureTests(unittest.TestCase):
 
 class SkillBehaviorContractTests(unittest.TestCase):
     def skill(self, name: str) -> str:
-        return (PLUGIN_ROOT / "skills" / name / "SKILL.md").read_text()
+        return (PLUGIN_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
 
     def test_prepare_requires_atomic_next_action_and_dated_live_state(self):
         text = " ".join(self.skill("handoff-prepare").split())
@@ -85,16 +85,16 @@ class SkillBehaviorContractTests(unittest.TestCase):
 
 class LegacyFixtureTests(unittest.TestCase):
     def test_older_v21_layout_is_preserved_for_compatibility(self):
-        text = OLDER_V21_FIXTURE.read_text()
+        text = OLDER_V21_FIXTURE.read_text(encoding="utf-8")
         self.assertLess(text.index("## Delivery and acceptance ledger"),
                         text.index("## Next action and boundary"))
         self.assertIn("### L1: read now", text)
-        skill = (PLUGIN_ROOT / "skills" / "handoff-continue" / "SKILL.md").read_text()
+        skill = (PLUGIN_ROOT / "skills" / "handoff-continue" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("older V2.1", skill)
         self.assertIn("Do not treat `read now` as an", skill)
 
     def test_v1_fixture_remains_readable_without_v21_sections(self):
-        text = LEGACY_FIXTURE.read_text()
+        text = LEGACY_FIXTURE.read_text(encoding="utf-8")
         for heading in ("## Goal", "## Current state", "## Suggested next steps"):
             self.assertIn(heading, text)
         for v21_heading in ("## User checkpoint", "## Minimal reading package"):

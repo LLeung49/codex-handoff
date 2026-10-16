@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.4
+
+- Launch Windows hooks directly with `python` instead of nesting the command in
+  `cmd.exe /s /c`, which could preserve quotes around the absolute plugin path
+  and make Python resolve it relative to the session working directory.
+- Add a Windows-only process test for a plugin path containing spaces, a
+  repository-free installed-package test, and Linux/macOS/Windows CI.
+- Make the shipped test suite use explicit UTF-8 reads and skip the POSIX-only
+  permission check on Windows.
+- Standardize machine-facing hook prompts and the resume command on ASCII
+  English; reply `continue` to resume paused work.
+
 ## v0.3.3
 
 - Raise the one-time five-hour and weekly protective block threshold from 5%
@@ -10,21 +22,21 @@
 ## v0.3.2
 
 - Read hook input as UTF-8 JSON bytes instead of using the Windows Python pipe
-  code page. This fixes `继续开发` being misread and blocked again after the user
-  explicitly chooses to continue; ASCII handoff commands were unaffected.
+  code page. This fixes localized input being misread on Windows; ASCII handoff
+  commands were unaffected.
 
 ## v0.3.1
 
 - Adjust the one-time protective block threshold from 3% to 5% remaining quota, while keeping the soft warning tier starting at 15%.
 - Allow `$codex-handoff:handoff-prepare` and its natural language variants as safe-exit commands that immediately unlock pending blocks.
-- Ensure choosing `继续开发` (or `继续` / `continue`) permanently suppresses further blocks and tool stops in the active session until quota is fully exhausted.
+- Ensure choosing `continue` permanently suppresses further blocks and tool stops in the active session until quota is fully exhausted.
 
 ## v0.3.0
 
 - Stop only the active tool loop that first reaches the strong quota warning;
   later turns in the same reset window no longer create a fresh latch.
 - After a protective stop, require the user's explicit choice:
-  `$handoff-prepare` saves a checkpoint and `继续开发` resumes the paused task.
+  `$handoff-prepare` saves a checkpoint and `continue` resumes the paused task.
 - Make handoff skills capability-neutral: they guide progressive context reading
   and authorization boundaries without rejecting normal host read mechanisms.
 

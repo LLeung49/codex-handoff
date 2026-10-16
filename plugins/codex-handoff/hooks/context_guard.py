@@ -230,7 +230,7 @@ def _choice_reason(reasons: list[str]) -> str:
         prefix
         + "This work is paused because the quota is nearly exhausted. Reply "
         "`$codex-handoff:handoff-prepare` (or `$handoff-prepare`) to save a checkpoint, "
-        "or reply `继续开发` to resume the paused work."
+        "or reply `continue` to resume the paused work."
     )
 
 
@@ -258,8 +258,7 @@ def is_continue_command(prompt: object) -> bool:
     """Check if the user prompt is requesting to continue development."""
     if not isinstance(prompt, str):
         return False
-    p = prompt.strip().lower()
-    return p in ("继续开发", "继续", "continue") or p.startswith("继续开发")
+    return prompt.strip().lower() == "continue"
 
 
 def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
@@ -492,7 +491,7 @@ def main() -> None:
     """Read one hook payload from stdin and emit the Codex decision JSON."""
     try:
         # Codex sends JSON as UTF-8 bytes. Text-mode stdin can use a Windows
-        # code page and silently corrupt non-ASCII user choices such as 继续开发.
+        # code page and silently corrupt non-ASCII user input.
         payload = json.load(sys.stdin.buffer)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
         payload = {}

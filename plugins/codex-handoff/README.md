@@ -27,13 +27,21 @@ sessions automatically.
 
 Each command hook keeps `python3` for macOS/Linux and declares Codex's
 Windows-only `commandWindows` override as
-`cmd.exe /d /s /c python "%PLUGIN_ROOT%/hooks/context_guard.py"`. This pins
-Windows expansion to `cmd.exe`; `$PLUGIN_ROOT` is POSIX syntax and must not be
-used there. Windows users therefore need a working Python 3 interpreter
+`python "%PLUGIN_ROOT%\hooks\context_guard.py"`. Do not wrap this command in
+another `cmd.exe /s /c`: that extra shell layer can preserve the path quotes as
+literal argument characters and make Python resolve the script relative to the
+session working directory. Windows users need a working Python 3 interpreter
 available as `python` on `PATH`; do not rely solely on the Microsoft Store
 `python3.exe` app-execution alias. After installing or updating this plugin,
-use `/hooks` to review and trust the changed hook definitions, then start a
-fresh task (or restart Codex if it still shows an older definition).
+refresh the Marketplace cache, use `/hooks` to review and trust the changed hook
+definitions, then start a fresh task (or restart Codex if it still shows an
+older definition).
+
+The repository test workflow runs on Linux, macOS, and Windows. On Windows it
+executes the real `commandWindows` value from an unrelated working directory
+with a space-containing plugin path. It also reruns the suite from a copied
+plugin directory without repository-level files to approximate the installed
+Marketplace layout.
 
 ## V2.1 progressive handoff context and migration
 
@@ -61,7 +69,7 @@ and records a latch only for the turn that claimed the warning. A subsequent
 supported local tool in that same turn can be denied by `PreToolUse`; later
 turns at the same quota reset do not re-latch merely because they read a skill
 or create a handoff. The next user prompt explicitly chooses
-`$handoff-prepare` to save a checkpoint or `继续开发` to resume the paused
+`$handoff-prepare` to save a checkpoint or `continue` to resume the paused
 request. This guard is best effort: it cannot observe every model action, and
 hosted or special tool paths may bypass it. It does not switch sessions
 automatically.
@@ -93,6 +101,10 @@ work/validator-venv/bin/python -m pip install 'PyYAML==6.0.3'
 VALIDATOR_PYTHON="$PWD/work/validator-venv/bin/python"
 SYSTEM_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills/.system"
 "$VALIDATOR_PYTHON" -m unittest discover -s tests -v
+(
+  cd ../..
+  "$VALIDATOR_PYTHON" scripts/validate_installed_plugin.py
+)
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/plugin-creator/scripts/validate_plugin.py" .
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-context-setup
 "$VALIDATOR_PYTHON" "$SYSTEM_SKILLS/skill-creator/scripts/quick_validate.py" skills/handoff-prepare
