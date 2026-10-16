@@ -11,6 +11,9 @@
   Python's platform-default shell.
 - Add a real macOS process test for the existing POSIX hook command, including
   an unrelated working directory and a space-containing plugin path.
+- Preserve a complete first telemetry record when a bounded rollout read starts
+  exactly on an LF or CRLF line boundary. This fixes quota parsing on Windows
+  without changing the fail-open behavior for genuinely partial records.
 
 ## v0.3.4
 

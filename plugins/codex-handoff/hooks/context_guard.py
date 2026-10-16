@@ -35,14 +35,19 @@ def _latest_rate_limit(path: Path, key: str, window_minutes: int, tail_bytes: in
         with path.open("rb") as stream:
             stream.seek(0, 2)
             size = stream.tell()
-            stream.seek(max(0, size - tail_bytes))
+            start = max(0, size - tail_bytes)
+            starts_at_line_boundary = start == 0
+            if start > 0:
+                stream.seek(start - 1)
+                starts_at_line_boundary = stream.read(1) == b"\n"
+            stream.seek(start)
             data = stream.read()
     except (OSError, ValueError, TypeError):
         return None
 
     # A bounded read can begin in the middle of a JSONL record.  Discard that
     # partial record while retaining the final complete line if there is one.
-    if size > len(data):
+    if not starts_at_line_boundary:
         _, separator, data = data.partition(b"\n")
         if not separator:
             return None

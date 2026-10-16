@@ -203,6 +203,26 @@ class TelemetryTests(unittest.TestCase):
             tail_bytes = len(NEWER_EVENT.encode()) + 2
             self.assertEqual(latest_primary_rate_limit(rollout, tail_bytes=tail_bytes)["resets_at"], RESET + 300)
 
+    def test_bounded_tail_retains_complete_line_at_exact_lf_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rollout = Path(directory) / "rollout.jsonl"
+            event = NEWER_EVENT.encode()
+            rollout.write_bytes(b"x" * 100 + b"\n" + event + b"\n")
+            self.assertEqual(
+                latest_primary_rate_limit(rollout, tail_bytes=len(event) + 1)["resets_at"],
+                RESET + 300,
+            )
+
+    def test_bounded_tail_retains_complete_line_at_exact_crlf_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rollout = Path(directory) / "rollout.jsonl"
+            event = NEWER_EVENT.encode()
+            rollout.write_bytes(b"x" * 100 + b"\r\n" + event + b"\r\n")
+            self.assertEqual(
+                latest_primary_rate_limit(rollout, tail_bytes=len(event) + 2)["resets_at"],
+                RESET + 300,
+            )
+
 
 class PluginMetadataTests(unittest.TestCase):
     def test_root_readme_documents_public_marketplace_installation(self):
