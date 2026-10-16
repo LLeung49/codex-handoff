@@ -300,9 +300,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_4_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_5_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertRegex(manifest["version"], r"^0\.3\.4\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.5\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -320,7 +320,7 @@ class HookConfigurationTests(unittest.TestCase):
             self.assertEqual(handler["command"], 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"')
             self.assertEqual(
                 handler["commandWindows"],
-                'python "%PLUGIN_ROOT%\\hooks\\context_guard.py"',
+                'python "${env:PLUGIN_ROOT}\\hooks\\context_guard.py"',
             )
 
     def test_tool_hooks_match_all_tools_synchronously(self):
@@ -331,13 +331,38 @@ class HookConfigurationTests(unittest.TestCase):
                 "hooks": [{
                     "type": "command",
                     "command": 'python3 "$PLUGIN_ROOT/hooks/context_guard.py"',
-                    "commandWindows": 'python "%PLUGIN_ROOT%\\hooks\\context_guard.py"',
+                    "commandWindows": 'python "${env:PLUGIN_ROOT}\\hooks\\context_guard.py"',
                 }],
             }])
 
-    @unittest.skipUnless(os.name == "nt", "Windows command execution requires cmd.exe")
-    def test_windows_command_launches_from_unrelated_cwd_with_spaces(self):
-        """Catch nested cmd.exe quoting that turns an absolute path into a cwd-relative one."""
+    @unittest.skipUnless(sys.platform == "darwin", "macOS command execution requires /bin/sh")
+    def test_macos_command_launches_from_unrelated_cwd_with_spaces(self):
+        """Catch broken POSIX expansion or quoting in the shipped macOS command."""
+        hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+        command = hooks["PostToolUse"][0]["hooks"][0]["command"]
+        with tempfile.TemporaryDirectory(prefix="codex handoff ") as directory:
+            temp_root = Path(directory)
+            plugin_root = temp_root / "installed plugin"
+            shutil.copytree(ROOT / "hooks", plugin_root / "hooks")
+            session_cwd = temp_root / "unrelated project"
+            session_cwd.mkdir()
+            data_dir = temp_root / "plugin data"
+            result = subprocess.run(
+                ["/bin/sh", "-c", command],
+                input=json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"}),
+                text=True,
+                capture_output=True,
+                cwd=session_cwd,
+                env={**os.environ, "PLUGIN_ROOT": str(plugin_root), "PLUGIN_DATA": str(data_dir)},
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
+
+    @unittest.skipUnless(os.name == "nt", "Windows command execution requires PowerShell")
+    def test_windows_command_launches_in_powershell_from_unrelated_cwd_with_spaces(self):
+        """Catch cmd.exe environment syntax that PowerShell leaves unexpanded."""
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
         command = hooks["PostToolUse"][0]["hooks"][0]["commandWindows"]
         with tempfile.TemporaryDirectory(prefix="codex handoff ") as directory:
@@ -348,14 +373,13 @@ class HookConfigurationTests(unittest.TestCase):
             session_cwd.mkdir()
             data_dir = temp_root / "plugin data"
             result = subprocess.run(
-                command,
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
                 input=json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"}),
                 text=True,
                 capture_output=True,
                 cwd=session_cwd,
                 env={**os.environ, "PLUGIN_ROOT": str(plugin_root), "PLUGIN_DATA": str(data_dir)},
                 timeout=10,
-                shell=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "")

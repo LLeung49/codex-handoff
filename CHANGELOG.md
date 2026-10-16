@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.5
+
+- Expand `PLUGIN_ROOT` with PowerShell syntax in every Windows hook command.
+  Version 0.3.4 used cmd.exe syntax even though Codex executes the Windows
+  override through PowerShell, leaving the variable literal and preventing the
+  Python script from starting.
+- Execute the Windows regression test explicitly through
+  `powershell.exe -NoProfile -NonInteractive -Command` instead of relying on
+  Python's platform-default shell.
+- Add a real macOS process test for the existing POSIX hook command, including
+  an unrelated working directory and a space-containing plugin path.
+
 ## v0.3.4
 
 - Launch Windows hooks directly with `python` instead of nesting the command in

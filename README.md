@@ -90,11 +90,16 @@ codex plugin list
 
 #### Windows 使用说明
 
-从 v0.3.4 起，Windows 上的 hook 直接执行
-`python "%PLUGIN_ROOT%\hooks\context_guard.py"`，不再额外嵌套
-`cmd.exe /s /c`，避免带引号的绝对路径被错误拼到当前项目目录后面。macOS/Linux
-仍调用 `python3`。Windows 请先在终端确认 `python --version` 能运行，并确保它
-指向 Python 3；不要只依赖 Microsoft Store 的 `python3.exe` 执行别名。
+从 v0.3.5 起，Windows 上的 hook 使用 PowerShell 环境变量语法执行
+`python "${env:PLUGIN_ROOT}\hooks\context_guard.py"`。0.3.4 错误地使用了
+cmd.exe 的 `%PLUGIN_ROOT%` 写法；在 PowerShell 中变量不会展开，Python 因而找不到
+插件脚本。macOS/Linux 仍调用 `python3 "$PLUGIN_ROOT/hooks/context_guard.py"`。
+Windows 请先在终端确认 `python --version` 能运行并指向 Python 3；不要只依赖
+Microsoft Store 的 `python3.exe` 执行别名。
+
+仓库的 Windows 测试会显式通过 PowerShell 启动 Hook；macOS 测试则通过 POSIX
+Shell 启动。两边都会使用带空格的插件路径和无关工作目录，避免再次用错误的 Shell
+模拟真实环境。
 
 从 v0.3.4 起，Hook 提示和机器交互指令统一使用 ASCII 英文。低额度下若要继续原任务，请只回复 `continue`；不再把本地化文字作为控制命令，避免 Windows 代码页和跨终端编码差异。
 
@@ -115,7 +120,7 @@ codex plugin list
 #### 每次升级后：先重新部署，再做本地验收
 
 1. 按上面的命令移除插件和 Marketplace，再重新添加；不要直接拿旧缓存验证。
-2. 运行 `codex plugin list`，确认实际加载的是 README 所述的新版本。
+2. 运行 `codex plugin list`，确认实际加载的是 `0.3.5+codex...`。
 3. 在 Codex 中打开 `/hooks`，重新审查并信任四个已变化的 Hook。
 4. 关闭当前任务并新开一个任务；若仍显示旧定义，再重启 Codex。
 5. 在不重要的测试项目中发送：`Run python --version as a hook smoke test. Do not read or write project files.`

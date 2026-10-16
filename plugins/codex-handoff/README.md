@@ -27,19 +27,20 @@ sessions automatically.
 
 Each command hook keeps `python3` for macOS/Linux and declares Codex's
 Windows-only `commandWindows` override as
-`python "%PLUGIN_ROOT%\hooks\context_guard.py"`. Do not wrap this command in
-another `cmd.exe /s /c`: that extra shell layer can preserve the path quotes as
-literal argument characters and make Python resolve the script relative to the
-session working directory. Windows users need a working Python 3 interpreter
-available as `python` on `PATH`; do not rely solely on the Microsoft Store
-`python3.exe` app-execution alias. After installing or updating this plugin,
-refresh the Marketplace cache, use `/hooks` to review and trust the changed hook
-definitions, then start a fresh task (or restart Codex if it still shows an
-older definition).
+`python "${env:PLUGIN_ROOT}\hooks\context_guard.py"`. Codex executes the
+Windows override through PowerShell, so cmd.exe syntax such as `%PLUGIN_ROOT%`
+remains literal and must not be used. Windows users need a working Python 3
+interpreter available as `python` on `PATH`; do not rely solely on the Microsoft
+Store `python3.exe` app-execution alias. After installing or updating this
+plugin, refresh the Marketplace cache, use `/hooks` to review and trust the
+changed hook definitions, then start a fresh task (or restart Codex if it still
+shows an older definition).
 
 The repository test workflow runs on Linux, macOS, and Windows. On Windows it
-executes the real `commandWindows` value from an unrelated working directory
-with a space-containing plugin path. It also reruns the suite from a copied
+executes the real `commandWindows` value with `powershell.exe -NoProfile
+-NonInteractive -Command`. On macOS it executes the real POSIX command with
+`/bin/sh -c`. Both tests use an unrelated working directory and a
+space-containing plugin path. The workflow also reruns the suite from a copied
 plugin directory without repository-level files to approximate the installed
 Marketplace layout.
 
