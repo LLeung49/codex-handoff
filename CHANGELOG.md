@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.6
+
+- Retain a prompt blocked before submission and restore its exact text as
+  model-visible `UserPromptSubmit.additionalContext` when the user replies
+  `continue`. Address the blocked request before returning to any older plan.
+- Distinguish an unsubmitted prompt from a task paused after tool execution,
+  so continuing a tool stop does not replay completed work.
+- Carry an unanswered blocked request into handoff preparation as pending
+  context, and remove the stored request after either explicit choice.
+- Ask for the missing request when legacy or damaged pending state cannot
+  recover it. Preserve fail-open behavior when local request storage fails.
+- Add real-process recovery regressions covering both quota windows, UTF-8
+  prompts under Windows code pages, repeated confirmation, and state isolation.
+
 ## v0.3.5
 
 - Expand `PLUGIN_ROOT` with PowerShell syntax in every Windows hook command.

@@ -60,8 +60,10 @@ a fresh task for its L0 briefing. The incoming agent may ask zero to three
 targeted questions when facts are missing, then waits for a scoped user action.
 Clarification supplements are not selected or read without the user's choice.
 
-The plugin's data markers are opaque, local, zero-content dedupe/latch files.
-They are not project `.handoff/` documents and contain no handoff content.
+Dedupe and turn-latch markers are local, empty files. Pending-choice markers
+temporarily retain a blocked user prompt, or identify a stop after tool execution.
+They are removed after an explicit continue or handoff choice. Unconsumed markers
+remain local; nothing is uploaded. These are not project `.handoff/` documents.
 
 ## V3 quota guard limits
 
@@ -74,6 +76,13 @@ or create a handoff. The next user prompt explicitly chooses
 request. This guard is best effort: it cannot observe every model action, and
 hosted or special tool paths may bypass it. It does not switch sessions
 automatically.
+
+When `UserPromptSubmit` blocks a new prompt, `continue` restores that exact
+request through model-visible `additionalContext`, with user-level authority.
+The agent must address it before returning to an older plan. A stop during tool
+execution instead resumes the existing task without replaying completed work.
+Choosing handoff includes the blocked request only as an unanswered pending item.
+Legacy or corrupt state asks the user to identify the missing request.
 
 For safe live validation, run synthetic hook tests first. Then, only when
 normal work naturally reaches the threshold, observe one harmless supported

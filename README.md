@@ -120,7 +120,7 @@ codex plugin list
 #### 每次升级后：先重新部署，再做本地验收
 
 1. 按上面的命令移除插件和 Marketplace，再重新添加；不要直接拿旧缓存验证。
-2. 运行 `codex plugin list`，确认实际加载的是 `0.3.5+codex...`。
+2. 运行 `codex plugin list`，确认实际加载的是 `0.3.6+codex...`。
 3. 在 Codex 中打开 `/hooks`，重新审查并信任四个已变化的 Hook。
 4. 关闭当前任务并新开一个任务；若仍显示旧定义，再重启 Codex。
 5. 在不重要的测试项目中发送：`Run python --version as a hook smoke test. Do not read or write project files.`
@@ -144,6 +144,8 @@ codex plugin marketplace remove codex-handoff
 
 在当前任务运行 `$handoff-prepare`，检查 `.handoff/` 里生成的交接单能否说清：现在停在哪里、做了什么、证据是什么、哪些还没有验收、建议的下一步是什么、还需要你授权什么。若你决定不交接，直接回复 `continue` 即可恢复原任务。若开新任务，再运行 `$handoff-continue`；它先做对齐报告，你授权一个明确的下一步后才继续。
 
+如果你刚提交的问题被额度保护拦住，回复 `continue` 后，Agent 会收到这条问题的完整原文，并被要求先处理它。例如你问“是否还有必要对比两份数据？”，继续后应先回答这个问题，再决定后续工作。若保护发生在任务运行中，则从已有断点继续，保留已完成的工具结果。选择交接时，被拦住、尚未回答的问题会作为待处理事项带入交接上下文。旧版本留下的空标记无法找回原文时，Agent 会请你补发问题。
+
 ## 三个技能分别做什么？
 
 - `$handoff-prepare`：把当前断点、目标、边界、交付/验收状态、决定与风险、唯一下一步写成一份不可变交接单；其他资料只列为 L1/L2 索引，不要求接手时一次读完。
@@ -157,7 +159,7 @@ codex plugin marketplace remove codex-handoff
 
 五小时额度在剩余 15% 到高于 6% 时产生一次软提醒；≤6% 时产生一次保护性阻断。周额度没有软提醒，≤6% 时也会独立阻断一次。`UserPromptSubmit` 在新请求开始前检查额度；`PostToolUse` 只在一个本地工具完成后记录交接提示；`PreToolUse` 只会在同一轮已触发保护后拒绝下一次受支持的本地工具调用；`PreCompact(auto)` 只提醒，不阻断。
 
-插件不会上传 telemetry。它只读取有限长度的本地 rollout 记录；读取失败或格式异常时 fail-open。去重和同轮保护使用的文件只存放本地状态，不保存 handoff 正文；真正的交接内容始终在项目 `.handoff/` 中。
+插件不会上传 telemetry。它只读取有限长度的本地 rollout 记录；读取失败或格式异常时 fail-open。去重和同轮保护使用空标记；等待你选择期间，待确认标记还会在本地暂存被拦截的 prompt。选择 `continue` 或交接后会删除对应待确认标记；若一直未作选择，文件会保留在本地，不会上传。真正的交接文档始终在项目 `.handoff/` 中。
 
 </details>
 

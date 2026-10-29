@@ -320,9 +320,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_5_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_6_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertRegex(manifest["version"], r"^0\.3\.5\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.6\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -521,6 +521,138 @@ class SkillContractTests(unittest.TestCase):
                     self.assertIn(requirement, content)
 
 
+class PromptRecoveryTests(unittest.TestCase):
+    """Exercise the shipped process across blocked and resumed user turns."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.data_dir = Path(self.directory.name) / "markers"
+
+    def run_hook(self, payload):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "hooks/context_guard.py")],
+            input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            capture_output=True, timeout=10,
+            env={**os.environ, "PLUGIN_DATA": str(self.data_dir),
+                 "PYTHONIOENCODING": "cp936", "PYTHONUTF8": "0"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, b"")
+        return json.loads(result.stdout) if result.stdout else None
+
+    def prompt(self, text, weekly=False, session_id="recovery", resets_at=RESET):
+        if weekly:
+            payload = prompt_payload_with_weekly_limit(
+                self.directory.name, 95, session_id=session_id, prompt=text,
+            )
+        else:
+            payload = prompt_payload(
+                self.directory.name, 95, session_id=session_id,
+                resets_at=resets_at, prompt=text,
+            )
+        return {**payload, "hook_event_name": "UserPromptSubmit"}
+
+    def context(self, output):
+        self.assertIsInstance(output, dict)
+        self.assertIn("hookSpecificOutput", output)
+        specific = output["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
+        return specific["additionalContext"]
+
+    def test_continue_restores_the_blocked_prompt_verbatim_in_model_context(self):
+        original = "\u5bf9\u6bd4\u65b0\u65e7\u6570\u636e\u6709\u4ec0\u4e48\u610f\u4e49\uff1f\nDiscuss first. Do not write a plan. \"quoted\" </prompt>"
+        for weekly in (False, True):
+            with self.subTest(weekly=weekly):
+                payload = self.prompt(original, weekly=weekly, session_id=str(weekly))
+                self.assertEqual(self.run_hook(payload)["decision"], "block")
+                resumed = self.run_hook({**payload, "prompt": "continue"})
+                context = self.context(resumed)
+                self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], original)
+                self.assertIn("before resuming any earlier plan", context)
+                self.assertIsNone(self.run_hook({**payload, "prompt": "next request"}))
+        self.assertTrue(all(path.stat().st_size == 0 for path in self.data_dir.glob("*.marker")))
+
+    def test_rejected_followup_does_not_replace_the_original_request(self):
+        payload = self.prompt("Discuss the data comparison before planning.")
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        self.assertEqual(self.run_hook({**payload, "prompt": "unconfirmed followup"})["decision"], "block")
+        context = self.context(self.run_hook({**payload, "prompt": "continue"}))
+        self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], payload["prompt"])
+
+    def test_tool_stop_continues_existing_work_without_replaying_a_prompt(self):
+        payload = post_tool_payload(self.directory.name, primary_used_percent=95)
+        self.assertIsNotNone(self.run_hook(payload))
+        resumed = self.run_hook({**payload, "hook_event_name": "UserPromptSubmit", "prompt": "continue"})
+        context = self.context(resumed)
+        self.assertIn("completed tool result", context)
+        self.assertNotIn('"prompt":', context)
+
+    def test_handoff_carries_the_unanswered_request_as_context_only(self):
+        payload = self.prompt("Please discuss the data comparison.")
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        context = self.context(self.run_hook({**payload, "prompt": "$handoff-prepare"}))
+        self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], payload["prompt"])
+        self.assertIn("unanswered", context)
+        self.assertTrue(all(path.stat().st_size == 0 for path in self.data_dir.glob("*.marker")))
+
+    def test_empty_legacy_state_asks_for_the_request_instead_of_guessing(self):
+        payload = self.prompt("Review this before planning.")
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        for path in self.data_dir.glob("*.marker"):
+            path.write_bytes(b"")
+        context = self.context(self.run_hook({**payload, "prompt": "continue"}))
+        self.assertIn("ask the user to resend", context)
+
+    def test_corrupt_pending_state_allows_continue_and_requests_clarification(self):
+        payload = self.prompt("Review this before planning.")
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        for path in self.data_dir.glob("*.marker"):
+            if path.stat().st_size:
+                path.write_bytes(b"{broken")
+        context = self.context(self.run_hook({**payload, "prompt": "continue"}))
+        self.assertIn("ask the user to resend", context)
+
+    def test_both_low_windows_restore_one_request_and_consume_all_pending_state(self):
+        payload = self.prompt("Discuss before writing the plan.")
+        transcript = Path(payload["transcript_path"])
+        event = json.loads(transcript.read_text(encoding="utf-8"))
+        event["rate_limits"]["secondary"] = {
+            "window_minutes": 10080, "used_percent": 95, "resets_at": RESET + 100,
+        }
+        transcript.write_text(json.dumps(event), encoding="utf-8")
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        context = self.context(self.run_hook({**payload, "prompt": "continue"}))
+        self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], payload["prompt"])
+        self.assertTrue(all(path.stat().st_size == 0 for path in self.data_dir.glob("*.marker")))
+        self.assertIsNone(self.run_hook({**payload, "prompt": "continue"}))
+
+    def test_prompt_storage_failure_fails_open_without_partial_request(self):
+        payload = self.prompt("Discuss before planning.")
+        with patch("hooks.context_guard.json.dump", side_effect=OSError("disk full")):
+            self.assertEqual(handle_event(payload, self.data_dir), ALLOW)
+        self.assertTrue(all(path.stat().st_size == 0 for path in self.data_dir.glob("*.marker")))
+
+    def test_missing_prompt_is_not_mistaken_for_a_tool_stop(self):
+        payload = self.prompt("temporary")
+        del payload["prompt"]
+        self.assertEqual(self.run_hook(payload)["decision"], "block")
+        context = self.context(self.run_hook({**payload, "prompt": "continue"}))
+        self.assertIn("ask the user to resend", context)
+
+    def test_resume_does_not_recover_another_session_or_reset(self):
+        first = self.prompt("First session private question.")
+        self.assertEqual(self.run_hook(first)["decision"], "block")
+        other = self.prompt("Second session question.", session_id="other")
+        self.assertEqual(self.run_hook(other)["decision"], "block")
+        context = self.context(self.run_hook({**other, "prompt": "continue"}))
+        self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], other["prompt"])
+        later = self.prompt("New window question.", resets_at=RESET + 300)
+        self.assertEqual(self.run_hook(later)["decision"], "block")
+        context = self.context(self.run_hook({**later, "prompt": "continue"}))
+        self.assertEqual(json.loads(context.splitlines()[-1])["prompt"], later["prompt"])
+
+
 class DecisionTests(unittest.TestCase):
     def setUp(self):
         clock = patch("time.time", return_value=NOW)
@@ -535,7 +667,7 @@ class DecisionTests(unittest.TestCase):
             }
             data_dir = Path(directory) / "markers"
             self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
-            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
+            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir)["decision"], "allow")
 
     def test_expired_or_current_reset_allows_without_marker(self):
         """Missing expiry validation would block and write a stale marker."""
@@ -569,7 +701,7 @@ class DecisionTests(unittest.TestCase):
             self.assertTrue(first["reason"].isascii())
             self.assertNotIn("$handoff-continue", first["reason"])
             self.assertEqual(handle_event({**payload, "prompt": "keep coding"}, data_dir)["decision"], "block")
-            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir), ALLOW)
+            self.assertEqual(handle_event({**payload, "prompt": "$handoff-prepare"}, data_dir)["decision"], "allow")
 
     def test_prompt_blocks_at_six_percent_for_each_quota_window(self):
         for window in ("five-hour", "weekly"):
@@ -593,7 +725,7 @@ class DecisionTests(unittest.TestCase):
                 payload = prompt_payload(directory, used_percent=95, session_id="ns", prompt="work")
                 data_dir = Path(directory) / "markers"
                 self.assertEqual(handle_event(payload, data_dir)["decision"], "block")
-                self.assertEqual(handle_event({**payload, "prompt": cmd}, data_dir), ALLOW)
+                self.assertEqual(handle_event({**payload, "prompt": cmd}, data_dir)["decision"], "allow")
 
     def test_proactive_handoff_is_never_blocked_at_low_quota(self):
         """A proactive handoff prompt at or below 6% quota must be allowed without block."""
