@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -77,7 +78,7 @@ def prompt_payload_with_weekly_limit(directory, weekly_used_percent, session_id=
 
 
 def post_tool_payload(directory, primary_used_percent=10, weekly_used_percent=None,
-                      session_id="session", turn_id="turn", resets_at=RESET):
+                      session_id="session", turn_id="turn", resets_at=RESET, weekly_resets_at=None):
     """Create a PostToolUse payload backed by a Codex event_msg rollout."""
     transcript = Path(directory) / f"post-tool-{session_id}-{turn_id}-{resets_at}.jsonl"
     limits = {
@@ -91,7 +92,7 @@ def post_tool_payload(directory, primary_used_percent=10, weekly_used_percent=No
         limits["secondary"] = {
             "window_minutes": 10080,
             "used_percent": weekly_used_percent,
-            "resets_at": resets_at + 100,
+            "resets_at": resets_at + 100 if weekly_resets_at is None else weekly_resets_at,
         }
     transcript.write_text(json.dumps({
         "type": "event_msg",
@@ -320,9 +321,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_6_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_7_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertRegex(manifest["version"], r"^0\.3\.6\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.7\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -735,7 +736,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event(payload, data_dir), ALLOW)
 
     def test_continue_burns_remaining_quota_without_further_blocks_or_stops(self):
-        """Choosing to continue development suppresses all further blocks and tool stops in the session."""
+        """Choosing to continue suppresses further protection for the acknowledged window."""
         with tempfile.TemporaryDirectory() as directory:
             payload = prompt_payload(directory, used_percent=95, session_id="burn", prompt="start feature")
             data_dir = Path(directory) / "markers"
@@ -762,6 +763,76 @@ class DecisionTests(unittest.TestCase):
                 "turn_id": "turn-later",
             }
             self.assertEqual(handle_event(pre_tool, data_dir), ALLOW)
+
+    def test_weekly_continue_does_not_hide_the_new_five_hour_window(self):
+        for event_name in ("UserPromptSubmit", "PostToolUse"):
+            with self.subTest(event=event_name), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                before = post_tool_payload(
+                    directory, primary_used_percent=94, weekly_used_percent=94,
+                    resets_at=NOW + 10, weekly_resets_at=RESET + 86400,
+                )
+                submit = {**before, "hook_event_name": "UserPromptSubmit", "prompt": "Original request"}
+                self.assertEqual(handle_event(submit, data_dir)["decision"], "block")
+                self.assertEqual(handle_event({**submit, "prompt": "continue"}, data_dir)["decision"], "allow")
+
+                with patch("time.time", return_value=NOW + 11):
+                    warning = post_tool_payload(
+                        directory, primary_used_percent=85, weekly_used_percent=94,
+                        weekly_resets_at=RESET + 86400, turn_id="warning",
+                    )
+                    submit = {**warning, "hook_event_name": "UserPromptSubmit", "prompt": "New request"}
+                    self.assertIn("Five-hour quota is low", handle_event(submit, data_dir).get("reason", ""))
+                    self.assertEqual(handle_event(submit, data_dir), ALLOW)
+
+                    low = post_tool_payload(
+                        directory, primary_used_percent=94, weekly_used_percent=94,
+                        weekly_resets_at=RESET + 86400, turn_id="new-window",
+                    )
+                    result = handle_event({**low, "hook_event_name": event_name, "prompt": "New request"}, data_dir)
+                    self.assertNotIn("Weekly quota", result.get("reason", ""))
+                    if event_name == "UserPromptSubmit":
+                        self.assertEqual(result["decision"], "block")
+                    else:
+                        self.assertTrue(result.get("tool_stop"))
+                        pre_tool = {**low, "hook_event_name": "PreToolUse"}
+                        self.assertEqual(handle_event(pre_tool, data_dir)["decision"], "block")
+
+    def test_continue_does_not_preapprove_a_healthy_quota_window(self):
+        for first in ("five-hour", "weekly"):
+            with self.subTest(first=first), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                before = post_tool_payload(
+                    directory, primary_used_percent=94 if first == "five-hour" else 10,
+                    weekly_used_percent=94 if first == "weekly" else 10, weekly_resets_at=RESET,
+                )
+                submit = {**before, "hook_event_name": "UserPromptSubmit", "prompt": "Original request"}
+                self.assertEqual(handle_event(submit, data_dir)["decision"], "block")
+                self.assertEqual(handle_event({**submit, "prompt": "continue"}, data_dir)["decision"], "allow")
+                after = post_tool_payload(
+                    directory, primary_used_percent=94, weekly_used_percent=94,
+                    weekly_resets_at=RESET, turn_id="other-window",
+                )
+                result = handle_event(after, data_dir)
+                self.assertTrue(result.get("tool_stop"))
+                expected = "Weekly quota" if first == "five-hour" else "Five-hour quota"
+                self.assertIn(expected, result["reason"])
+                submit = {**after, "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
+                self.assertIn("additional_context", handle_event(submit, data_dir))
+                self.assertEqual(handle_event({**after, "turn_id": "later"}, data_dir), ALLOW)
+
+    def test_legacy_continue_marker_does_not_bypass_new_five_hour_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            data_dir.mkdir()
+            weekly_reset = RESET + 86400
+            old_key = json.dumps(["session", weekly_reset, "user-continue"], separators=(",", ":"))
+            (data_dir / (hashlib.sha256(old_key.encode("utf-8")).hexdigest() + ".marker")).touch()
+            payload = post_tool_payload(
+                directory, primary_used_percent=94, weekly_used_percent=10, weekly_resets_at=weekly_reset,
+            )
+            self.assertTrue(handle_event(payload, data_dir).get("tool_stop"))
+            self.assertEqual(handle_event({**payload, "hook_event_name": "PreToolUse"}, data_dir)["decision"], "block")
 
     def test_continue_variations_recognized(self):
         for choice in ("continue", "Continue"):

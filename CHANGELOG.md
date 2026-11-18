@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.7
+
+- Scope `continue` to the quota windows that actually requested confirmation,
+  keyed by session, window type, and reset time. A new five-hour window can
+  still warn at 15% and pause at 6% even if the weekly window was acknowledged.
+- Ignore old unscoped continue markers after upgrade, while retaining existing
+  warning deduplication and pending prompt recovery.
+
 ## v0.3.6
 
 - Retain a prompt blocked before submission and restore its exact text as

@@ -349,7 +349,9 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             if level != "strong":
                 continue
             resets_at = _number(snapshot.get("resets_at"))
-            if resets_at is not None and resets_at > time.time():
+            if resets_at is not None and resets_at > time.time() and not _marker_exists(
+                data_dir, session_id, resets_at, "user-continue", window,
+            ):
                 strong_windows.append((window, resets_at, reason))
 
         prompt = payload.get("prompt")
@@ -368,25 +370,13 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
                 return {"decision": "allow", "additional_context": _resume_context(state, handoff=True)}
             return ALLOW
 
-        active_resets = [
-            r for r in (_number(s.get("resets_at")) if s else None for s in (primary, secondary))
-            if r is not None and r > time.time()
-        ]
-
-        # 2. If user already chose to continue in this session, do not block or warn again
-        if any(_marker_exists(Path(data_dir), session_id, r, "user-continue") for r in active_resets):
-            return ALLOW
-
-        # 3. Check for pending choices from a previous block
+        # 2. A continue choice acknowledges only the windows that prompted it.
         if pending:
             if is_continue_command(prompt):
                 state = _read_pending_request(Path(data_dir), session_id, pending)
                 for window, resets_at in pending:
+                    _claim_marker(data_dir, session_id, resets_at, "user-continue", window)
                     _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
-                for r in active_resets:
-                    _claim_marker(Path(data_dir), session_id, r, "user-continue")
-                for window, resets_at, _ in strong_windows:
-                    _claim_marker(Path(data_dir), session_id, resets_at, "strong", window)
                 return {
                     "decision": "allow",
                     "reason": "Resuming the paused request; treat this as continuation, not a new task.",
@@ -394,7 +384,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
                 }
             return {"decision": "block", "reason": _choice_reason([])}
 
-        # 4. First-time block when quota reaches strong threshold (<= 6%)
+        # 3. First-time block when quota reaches strong threshold (<= 6%)
         strong_reasons = []
         for window, resets_at, reason in strong_windows:
             if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
@@ -405,12 +395,14 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
         if strong_reasons:
             return {"decision": "block", "reason": _choice_reason(strong_reasons)}
 
-        # 5. Soft warning above 6% and up to 15% (non-blocking)
+        # 4. Soft warning above 6% and up to 15% (non-blocking)
         if primary:
             level = quota_warning(primary)
             resets_at = _number(primary.get("resets_at"))
-            if level == "soft" and resets_at is not None and resets_at > time.time() and _claim_marker(
-                Path(data_dir), session_id, resets_at, level, "five-hour"
+            if (
+                level == "soft" and resets_at is not None and resets_at > time.time()
+                and not _marker_exists(data_dir, session_id, resets_at, "user-continue", "five-hour")
+                and _claim_marker(data_dir, session_id, resets_at, level, "five-hour")
             ):
                 return {"decision": "allow", "reason": _soft_reason()}
         return ALLOW
@@ -445,13 +437,6 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
         primary = latest_primary_rate_limit(Path(transcript_path))
         secondary = latest_secondary_rate_limit(Path(transcript_path))
 
-        active_resets = [
-            r for r in (_number(s.get("resets_at")) if s else None for s in (primary, secondary))
-            if r is not None and r > time.time()
-        ]
-        if any(_marker_exists(Path(data_dir), session_id, r, "user-continue") for r in active_resets):
-            return ALLOW
-
         reasons = []
         for window, snapshot, level, reason in (
             ("five-hour", primary, quota_warning(primary) if primary else None,
@@ -464,6 +449,8 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
                 continue
             resets_at = _number(snapshot.get("resets_at"))
             if resets_at is None or resets_at <= time.time():
+                continue
+            if _marker_exists(data_dir, session_id, resets_at, "user-continue", window):
                 continue
             if claim_strong_tool_stop(Path(data_dir), session_id, turn_id, resets_at, window):
                 reasons.append(reason)
