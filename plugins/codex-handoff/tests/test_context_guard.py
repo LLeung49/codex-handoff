@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -883,6 +884,48 @@ class DecisionTests(unittest.TestCase):
             later = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET + 2, turn_id="T2")
             self.assertEqual(handle_event(later, data_dir), ALLOW)
 
+    def test_fractional_reset_samples_share_the_same_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            initial = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET + 0.5)
+            self.assertTrue(handle_event(initial, data_dir).get("tool_stop"))
+            later = post_tool_payload(
+                directory, weekly_used_percent=94, weekly_resets_at=RESET + 2.5, turn_id="next",
+            )
+            resume = {**later, "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
+            self.assertIn("additional_context", handle_event(resume, data_dir))
+            self.assertEqual(handle_event(later, data_dir), ALLOW)
+
+    def test_concurrent_jittered_tool_stops_claim_one_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            from hooks import context_guard
+
+            data_dir = Path(directory) / "markers"
+            first = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET, turn_id="first")
+            second = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET + 1, turn_id="second")
+            looked_up = threading.Event()
+            release = threading.Event()
+            lookup = context_guard._active_marker_reset
+            results = []
+
+            def paused_lookup(data, session, reset, kind, window):
+                result = lookup(data, session, reset, kind, window)
+                if kind == "strong" and reset == RESET:
+                    looked_up.set()
+                    release.wait(5)
+                return result
+
+            with patch.object(context_guard, "_active_marker_reset", side_effect=paused_lookup):
+                worker = threading.Thread(target=lambda: results.append(handle_event(first, data_dir)))
+                worker.start()
+                try:
+                    self.assertTrue(looked_up.wait(5))
+                    results.append(handle_event(second, data_dir))
+                finally:
+                    release.set()
+                    worker.join(5)
+            self.assertEqual(sum(bool(result.get("tool_stop")) for result in results), 1)
+
     def test_continue_variations_recognized(self):
         for choice in ("continue", "Continue"):
             with self.subTest(choice=choice), tempfile.TemporaryDirectory() as directory:
@@ -1074,7 +1117,7 @@ class ToolLoopTests(unittest.TestCase):
                     payload["transcript_path"] = str(Path(directory) / "missing.jsonl")
 
                 if case == "storage":
-                    with patch("hooks.context_guard._claim_marker", side_effect=OSError("read-only")):
+                    with patch.object(Path, "mkdir", side_effect=OSError("read-only")):
                         decision = handle_event(payload, data_dir)
                 else:
                     decision = handle_event(payload, data_dir)

@@ -77,7 +77,9 @@ def _latest_rate_limit(path: Path, key: str, window_minutes: int, tail_bytes: in
         snapshot = dict(rate_limit)
         snapshot["window_minutes"] = window
         snapshot["used_percent"] = used
-        snapshot["resets_at"] = resets_at
+        # Marker lookup uses whole Unix seconds. Rounding down never extends
+        # an acknowledgement beyond the reported cutoff.
+        snapshot["resets_at"] = math.floor(resets_at)
         return snapshot
     return None
 
@@ -158,6 +160,31 @@ def _active_marker_reset(
         ):
             return candidate
     return None
+
+
+def _claim_window_marker(
+    data_dir: Path, session_id: str, resets_at: int | float, kind: str, window: str,
+) -> bool:
+    """Serialize nearby-reset lookup and creation across hook processes."""
+    lock = _marker_path(data_dir, session_id, kind, window).with_suffix(".lock")
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        with lock.open("ab") as stream:
+            stream.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Closing the descriptor releases the lock, including on process exit.
+            if _active_marker_reset(data_dir, session_id, resets_at, kind, window) is not None:
+                return False
+            return _claim_marker(data_dir, session_id, resets_at, kind, window)
+    except OSError:
+        return False
 
 
 def _claim_pending_choice(
@@ -292,9 +319,7 @@ def claim_strong_tool_stop(
     data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
 ) -> bool:
     """Claim one strong warning and latch only the turn that claimed it."""
-    if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is not None:
-        return False
-    if not _claim_marker(data_dir, session_id, resets_at, "strong", window):
+    if not _claim_window_marker(data_dir, session_id, resets_at, "strong", window):
         return False
     if not claim_turn_latch(data_dir, session_id, turn_id, resets_at, window):
         return False
@@ -398,8 +423,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             for window, resets_at in pending:
                 _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
             for window, resets_at, _ in strong_windows:
-                if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is None:
-                    _claim_marker(data_dir, session_id, resets_at, "strong", window)
+                _claim_window_marker(data_dir, session_id, resets_at, "strong", window)
             if state.get("source") == "user-prompt":
                 return {"decision": "allow", "additional_context": _resume_context(state, handoff=True)}
             return ALLOW
@@ -422,9 +446,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
         # 3. First-time block when quota reaches strong threshold (<= 6%)
         strong_reasons = []
         for window, resets_at, reason in strong_windows:
-            if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is not None:
-                continue
-            if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
+            if _claim_window_marker(data_dir, session_id, resets_at, "strong", window):
                 if _claim_pending_choice(
                     Path(data_dir), session_id, resets_at, window, prompt, source="user-prompt",
                 ):
@@ -439,8 +461,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             if (
                 level == "soft" and resets_at is not None and resets_at > time.time()
                 and _active_marker_reset(data_dir, session_id, resets_at, "user-continue", "five-hour") is None
-                and _active_marker_reset(data_dir, session_id, resets_at, level, "five-hour") is None
-                and _claim_marker(data_dir, session_id, resets_at, level, "five-hour")
+                and _claim_window_marker(data_dir, session_id, resets_at, level, "five-hour")
             ):
                 return {"decision": "allow", "reason": _soft_reason()}
         return ALLOW
