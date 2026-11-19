@@ -120,7 +120,7 @@ codex plugin list
 #### 每次升级后：先重新部署，再做本地验收
 
 1. 按上面的命令移除插件和 Marketplace，再重新添加；不要直接拿旧缓存验证。
-2. 运行 `codex plugin list`，确认实际加载的是 `0.3.7+codex...`。
+2. 运行 `codex plugin list`，确认实际加载的是 `0.3.8+codex...`。
 3. 在 Codex 中打开 `/hooks`，重新审查并信任四个已变化的 Hook。
 4. 关闭当前任务并新开一个任务；若仍显示旧定义，再重启 Codex。
 5. 在不重要的测试项目中发送：`Run python --version as a hook smoke test. Do not read or write project files.`

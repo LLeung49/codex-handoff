@@ -110,6 +110,7 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
 
 
 ALLOW = {"decision": "allow"}
+RESET_JITTER_SECONDS = 3
 
 
 def _marker_path(data_dir: Path, *key_parts: object) -> Path:
@@ -138,11 +139,25 @@ def _marker_exists(data_dir: Path, *key_parts: object) -> bool:
         return False
 
 
-def _pending_choice_exists(
-    data_dir: Path, session_id: str, resets_at: int | float, window: str
-) -> bool:
-    """Return whether this still-active quota window awaits the user's choice."""
-    return _marker_exists(data_dir, session_id, resets_at, "pending-choice", window)
+def _active_marker_reset(
+    data_dir: Path, session_id: str, resets_at: int | float, kind: str, window: str,
+) -> int | float | None:
+    """Find an active marker despite small changes in the reported reset time."""
+    now = time.time()
+    if resets_at <= now:
+        return None
+    if _marker_exists(data_dir, session_id, resets_at, kind, window):
+        return resets_at
+    # Rollouts can report the same cutoff a few seconds apart. Reuse only a
+    # nearby marker of the same window type, with its original expiration.
+    nearby = range(math.ceil(resets_at - RESET_JITTER_SECONDS),
+                   math.floor(resets_at + RESET_JITTER_SECONDS) + 1)
+    for candidate in sorted(nearby, key=lambda value: abs(value - resets_at)):
+        if candidate != resets_at and candidate > now and _marker_exists(
+            data_dir, session_id, candidate, kind, window,
+        ):
+            return candidate
+    return None
 
 
 def _claim_pending_choice(
@@ -227,6 +242,20 @@ def _turn_latch_dir(data_dir: Path, session_id: str, turn_id: str) -> Path:
     return _marker_path(data_dir, session_id, turn_id, "tool-stop").with_suffix(".latches")
 
 
+def _clear_turn_latch(
+    data_dir: Path, session_id: str, turn_id: object, resets_at: int | float, window: str,
+) -> None:
+    if not isinstance(turn_id, str) or not turn_id:
+        return
+    try:
+        _marker_path(
+            _turn_latch_dir(data_dir, session_id, turn_id),
+            session_id, turn_id, resets_at, "tool-stop", window,
+        ).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def claim_turn_latch(
     data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
 ) -> bool:
@@ -263,6 +292,8 @@ def claim_strong_tool_stop(
     data_dir: Path, session_id: str, turn_id: str, resets_at: int | float, window: str
 ) -> bool:
     """Claim one strong warning and latch only the turn that claimed it."""
+    if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is not None:
+        return False
     if not _claim_marker(data_dir, session_id, resets_at, "strong", window):
         return False
     if not claim_turn_latch(data_dir, session_id, turn_id, resets_at, window):
@@ -349,23 +380,26 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             if level != "strong":
                 continue
             resets_at = _number(snapshot.get("resets_at"))
-            if resets_at is not None and resets_at > time.time() and not _marker_exists(
+            if resets_at is not None and resets_at > time.time() and _active_marker_reset(
                 data_dir, session_id, resets_at, "user-continue", window,
-            ):
+            ) is None:
                 strong_windows.append((window, resets_at, reason))
 
         prompt = payload.get("prompt")
-        pending = [
-            (window, resets_at) for window, resets_at, _ in strong_windows
-            if _pending_choice_exists(Path(data_dir), session_id, resets_at, window)
-        ]
+        pending = []
+        for window, resets_at, _ in strong_windows:
+            original_reset = _active_marker_reset(data_dir, session_id, resets_at, "pending-choice", window)
+            if original_reset is not None:
+                pending.append((window, original_reset))
 
         # 1. Handoff command is a safe exit: clear pending choices, claim strong, and allow immediately
         if is_handoff_command(prompt):
             state = _read_pending_request(Path(data_dir), session_id, pending)
-            for window, resets_at, _ in strong_windows:
+            for window, resets_at in pending:
                 _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
-                _claim_marker(Path(data_dir), session_id, resets_at, "strong", window)
+            for window, resets_at, _ in strong_windows:
+                if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is None:
+                    _claim_marker(data_dir, session_id, resets_at, "strong", window)
             if state.get("source") == "user-prompt":
                 return {"decision": "allow", "additional_context": _resume_context(state, handoff=True)}
             return ALLOW
@@ -377,6 +411,7 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
                 for window, resets_at in pending:
                     _claim_marker(data_dir, session_id, resets_at, "user-continue", window)
                     _clear_pending_choice(Path(data_dir), session_id, resets_at, window)
+                    _clear_turn_latch(data_dir, session_id, payload.get("turn_id"), resets_at, window)
                 return {
                     "decision": "allow",
                     "reason": "Resuming the paused request; treat this as continuation, not a new task.",
@@ -387,6 +422,8 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
         # 3. First-time block when quota reaches strong threshold (<= 6%)
         strong_reasons = []
         for window, resets_at, reason in strong_windows:
+            if _active_marker_reset(data_dir, session_id, resets_at, "strong", window) is not None:
+                continue
             if _claim_marker(Path(data_dir), session_id, resets_at, "strong", window):
                 if _claim_pending_choice(
                     Path(data_dir), session_id, resets_at, window, prompt, source="user-prompt",
@@ -401,7 +438,8 @@ def handle_user_prompt(payload: dict, data_dir: Path) -> dict:
             resets_at = _number(primary.get("resets_at"))
             if (
                 level == "soft" and resets_at is not None and resets_at > time.time()
-                and not _marker_exists(data_dir, session_id, resets_at, "user-continue", "five-hour")
+                and _active_marker_reset(data_dir, session_id, resets_at, "user-continue", "five-hour") is None
+                and _active_marker_reset(data_dir, session_id, resets_at, level, "five-hour") is None
                 and _claim_marker(data_dir, session_id, resets_at, level, "five-hour")
             ):
                 return {"decision": "allow", "reason": _soft_reason()}
@@ -450,7 +488,7 @@ def handle_post_tool_use(payload: dict, data_dir: Path) -> dict:
             resets_at = _number(snapshot.get("resets_at"))
             if resets_at is None or resets_at <= time.time():
                 continue
-            if _marker_exists(data_dir, session_id, resets_at, "user-continue", window):
+            if _active_marker_reset(data_dir, session_id, resets_at, "user-continue", window) is not None:
                 continue
             if claim_strong_tool_stop(Path(data_dir), session_id, turn_id, resets_at, window):
                 reasons.append(reason)

@@ -321,9 +321,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "codex-handoff")
         self.assertEqual(manifest["skills"], "./skills/")
 
-    def test_plugin_manifest_uses_the_v0_3_7_release_version(self):
+    def test_plugin_manifest_uses_the_v0_3_8_release_version(self):
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertRegex(manifest["version"], r"^0\.3\.7\+codex\.\d{14}$")
+        self.assertRegex(manifest["version"], r"^0\.3\.8\+codex\.\d{14}$")
 
 
 class HookConfigurationTests(unittest.TestCase):
@@ -833,6 +833,51 @@ class DecisionTests(unittest.TestCase):
             )
             self.assertTrue(handle_event(payload, data_dir).get("tool_stop"))
             self.assertEqual(handle_event({**payload, "hook_event_name": "PreToolUse"}, data_dir)["decision"], "block")
+
+    def test_explicit_continue_releases_acknowledged_latch_in_a_reused_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            post = post_tool_payload(directory, weekly_used_percent=94)
+            pre = {**post, "hook_event_name": "PreToolUse"}
+            self.assertTrue(handle_event(post, data_dir).get("tool_stop"))
+            self.assertEqual(handle_event(pre, data_dir)["decision"], "block")
+            resume = {**post, "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
+            self.assertIn("additional_context", handle_event(resume, data_dir))
+            self.assertEqual(handle_event(pre, data_dir), ALLOW)
+            self.assertEqual(handle_event({**post, "turn_id": "later"}, data_dir), ALLOW)
+
+    def test_weekly_continue_survives_reset_timestamp_jitter_across_turns(self):
+        for confirm_offset in (0, 1):
+            with self.subTest(confirm_offset=confirm_offset), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory) / "markers"
+                initial = post_tool_payload(
+                    directory, weekly_used_percent=94, weekly_resets_at=RESET, turn_id="T1",
+                )
+                self.assertTrue(handle_event(initial, data_dir).get("tool_stop"))
+                confirmation = post_tool_payload(
+                    directory, weekly_used_percent=94, weekly_resets_at=RESET + confirm_offset, turn_id="T2",
+                )
+                resume = {**confirmation, "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
+                self.assertIn("additional_context", handle_event(resume, data_dir))
+                for turn_id, shift in (("T2", 2), ("T3", 1)):
+                    later = post_tool_payload(
+                        directory, weekly_used_percent=94, weekly_resets_at=RESET + shift, turn_id=turn_id,
+                    )
+                    self.assertEqual(handle_event(later, data_dir), ALLOW)
+                    self.assertEqual(handle_event({**later, "hook_event_name": "PreToolUse"}, data_dir), ALLOW)
+                with patch("time.time", return_value=RESET + 1):
+                    next_week = post_tool_payload(
+                        directory, weekly_used_percent=94, weekly_resets_at=RESET + 604800, turn_id="T4",
+                    )
+                    self.assertTrue(handle_event(next_week, data_dir).get("tool_stop"))
+
+    def test_reset_jitter_does_not_latch_another_turn_before_user_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory) / "markers"
+            initial = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET, turn_id="T1")
+            self.assertTrue(handle_event(initial, data_dir).get("tool_stop"))
+            later = post_tool_payload(directory, weekly_used_percent=94, weekly_resets_at=RESET + 2, turn_id="T2")
+            self.assertEqual(handle_event(later, data_dir), ALLOW)
 
     def test_continue_variations_recognized(self):
         for choice in ("continue", "Continue"):
