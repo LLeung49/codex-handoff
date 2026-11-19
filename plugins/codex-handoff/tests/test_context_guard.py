@@ -847,7 +847,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(handle_event({**post, "turn_id": "later"}, data_dir), ALLOW)
 
     def test_weekly_continue_survives_reset_timestamp_jitter_across_turns(self):
-        for confirm_offset in (0, 1):
+        for confirm_offset in (0, 1, -30, 30):
             with self.subTest(confirm_offset=confirm_offset), tempfile.TemporaryDirectory() as directory:
                 data_dir = Path(directory) / "markers"
                 initial = post_tool_payload(
@@ -859,15 +859,19 @@ class DecisionTests(unittest.TestCase):
                 )
                 resume = {**confirmation, "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
                 self.assertIn("additional_context", handle_event(resume, data_dir))
-                for turn_id, shift in (("T2", 2), ("T3", 1)):
+                for turn_id, shift in (("T2", 2), ("T3", 1), ("T4", -30), ("T5", 30)):
                     later = post_tool_payload(
                         directory, weekly_used_percent=94, weekly_resets_at=RESET + shift, turn_id=turn_id,
                     )
                     self.assertEqual(handle_event(later, data_dir), ALLOW)
                     self.assertEqual(handle_event({**later, "hook_event_name": "PreToolUse"}, data_dir), ALLOW)
-                with patch("time.time", return_value=RESET + 1):
+                with patch("time.time", return_value=RESET):
+                    after_expiry = post_tool_payload(
+                        directory, weekly_used_percent=94, weekly_resets_at=RESET + 30, turn_id="T6",
+                    )
+                    self.assertTrue(handle_event(after_expiry, data_dir).get("tool_stop"))
                     next_week = post_tool_payload(
-                        directory, weekly_used_percent=94, weekly_resets_at=RESET + 604800, turn_id="T4",
+                        directory, weekly_used_percent=94, weekly_resets_at=RESET + 604800, turn_id="T7",
                     )
                     self.assertTrue(handle_event(next_week, data_dir).get("tool_stop"))
 

@@ -110,7 +110,7 @@ def quota_warning(rate_limit: dict, window_minutes: int = 300, soft_warning: boo
 
 
 ALLOW = {"decision": "allow"}
-RESET_JITTER_SECONDS = 3
+RESET_JITTER_SECONDS = 30
 
 
 def _marker_path(data_dir: Path, *key_parts: object) -> Path:

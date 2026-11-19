@@ -2,7 +2,7 @@
 
 ## v0.3.8
 
-- Match active quota markers within three seconds of the reported reset time
+- Match active quota markers within 30 seconds of the reported reset time
   inside the same session and window type. Small telemetry shifts no longer
   lose a pending choice or pause an already acknowledged window again.
 - Release the acknowledged tool latch if continuation reuses its turn ID.
